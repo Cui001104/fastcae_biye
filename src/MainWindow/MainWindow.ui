@@ -196,6 +196,7 @@
    <addaction name="actionCreate_Line"/>
    <addaction name="actionCreate_Point"/>
    <addaction name="actionCreateDatumPlane"/>
+   <addaction name="actionCreateGear"/>
   </widget>
   <widget class="QToolBar" name="ChamferToolBar">
    <property name="windowTitle">
@@ -1350,6 +1351,18 @@
    </property>
    <property name="text">
     <string>Create Datum Plane</string>
+   </property>
+  </action>
+  <action name="actionCreateGear">
+   <property name="icon">
+    <iconset resource="../qrc/qianfan.qrc">
+     <normaloff>:/QUI/geometry/cylinder.png</normaloff>:/QUI/geometry/cylinder.png</iconset>
+   </property>
+   <property name="text">
+    <string>Create Gear</string>
+   </property>
+   <property name="toolTip">
+    <string>Create Involute Gear</string>
    </property>
   </action>
   <action name="actionDrawLine">

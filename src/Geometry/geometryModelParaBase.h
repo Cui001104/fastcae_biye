@@ -58,6 +58,7 @@ namespace Geometry
 		GeometryParaFillHole,			///< 创建填补孔洞的操作参数
 		GeometryParaRemoveSurface,		///< 创建移除曲面的操作参数
 		GeometryParaFillGap,			///< 
+		GeometryParaCreateGear,			///< 创建渐开线齿轮的操作参数
 	};
 
 	class GeometryData;

@@ -46,6 +46,7 @@
 #include "dialogMakeFillHole.h"
 #include "dialogMakeFillGap.h"
 #include "dialogMakeRemoveSurface.h"
+#include "dialogCreateGear.h"
 namespace GeometryWidget
 {
 	QDialog *GeometryDialogFactory::editGeometryDialog(GUI::MainWindow *m, MainWidget::PreWindow *p, Geometry::GeometrySet *set)
@@ -124,6 +125,9 @@ namespace GeometryWidget
 			break;
 		case Geometry::GeometryParaFillGap:
 			dlg = new MakeFillGapDialog(m, p, set);
+			break;
+		case Geometry::GeometryParaCreateGear:
+			dlg = new CreateGearDialog(m, p, set);
 			break;
 		default:
 			break;

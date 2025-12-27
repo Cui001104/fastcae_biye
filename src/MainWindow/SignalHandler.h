@@ -135,6 +135,7 @@ namespace GUI {
 		void MakeFillHole();
 		void MakeRemoveSurface();
 		void MakeFillGap();
+		void CreateGear();
 
 		void openPostFile();
 		void setPostDisplayMode(int type);

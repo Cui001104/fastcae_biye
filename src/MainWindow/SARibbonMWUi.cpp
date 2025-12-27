@@ -638,6 +638,9 @@ namespace Ui {
 			icon90.addFile(QString::fromUtf8(":/QUI/geometry/geoFixSurface.png"), QSize(),
 						   QIcon::Normal, QIcon::Off);
 			actionFillGap->setIcon(icon90);
+			actionCreateGear = new QAction(MainWindow);
+			actionCreateGear->setObjectName(QString::fromUtf8("actionCreateGear"));
+			actionCreateGear->setIcon(icon43); // 使用与 cylinder 相同的图标
 			actionVTKTranslation = new QAction(MainWindow);
 			actionVTKTranslation->setObjectName(QString::fromUtf8("actionVTKTranslation"));
 			actionVTKTranslation->setCheckable(false);
@@ -877,6 +880,7 @@ namespace Ui {
 				cube_pannel->addSmallAction(actionCreateCylinder);
 				cube_pannel->addSmallAction(actionCreaterCone);
 				cube_pannel->addSmallAction(actionCreaterSphere);
+				cube_pannel->addSmallAction(actionCreateGear);
 				create_point_pannel->addLargeAction(actionCreate_Point);
 				create_point_pannel->addMediumAction(actionCreate_Line);
 				create_point_pannel->addMediumAction(actionCreate_Face);
@@ -1258,6 +1262,12 @@ namespace Ui {
 			actionRemoveSurface->setText(
 				QCoreApplication::translate("MainWindow", "RemoveSurface", nullptr));
 			actionFillGap->setText(QCoreApplication::translate("MainWindow", "FillGap", nullptr));
+			actionCreateGear->setText(
+				QCoreApplication::translate("MainWindow", "Create Gear", nullptr));
+#if QT_CONFIG(tooltip)
+			actionCreateGear->setToolTip(
+				QCoreApplication::translate("MainWindow", "Create Involute Gear", nullptr));
+#endif // QT_CONFIG(tooltip)
 			actionVTKTranslation->setText(
 				QCoreApplication::translate("MainWindow", "Mesh Modeling", nullptr));
 			actionGeoMeshRotate->setText(

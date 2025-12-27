@@ -26,6 +26,7 @@
 #include "GeometryWidgets/dialogMakeFillet.h"
 #include "GeometryWidgets/dialogMakeFillGap.h"
 #include "GeometryWidgets/dialogMakeFillHole.h"
+#include "GeometryWidgets/dialogCreateGear.h"
 #include "GeometryWidgets/dialogMakeLoft.h"
 #include "GeometryWidgets/dialogMakeMatrix.h"
 #include "GeometryWidgets/dialogMakeRemoveSurface.h"
@@ -213,6 +214,7 @@ namespace GUI {
 		connect(mainwindow->getUi()->actionRemoveSurface, SIGNAL(triggered()), this,
 				SLOT(MakeRemoveSurface()));
 		connect(mainwindow->getUi()->actionFillGap, SIGNAL(triggered()), this, SLOT(MakeFillGap()));
+		connect(mainwindow->getUi()->actionCreateGear, SIGNAL(triggered()), this, SLOT(CreateGear()));
 		// connect(mainwindow->getUi()->actionDemo, SIGNAL(triggered()), this, SLOT(showDemo()));
 		connect(mainwindow->getUi()->actionOpenPostFile, SIGNAL(triggered()), this,
 				SLOT(openPostFile()));
@@ -1226,6 +1228,18 @@ namespace GUI {
 		MainWidget::PreWindow*			   p = sw->getPreWindow();
 		GeometryWidget::MakeFillGapDialog* dlg =
 			new GeometryWidget::MakeFillGapDialog(_mainWindow, p);
+		this->showDialog(dlg);
+	}
+
+	void SignalHandler::CreateGear()
+	{
+		SubWindowManager* sw = _mainWindow->getSubWindowManager();
+		if(!sw->isPreWindowOpened())
+			this->openPreWinPy();
+		MainWidget::PreWindow*				p = sw->getPreWindow();
+
+		GeometryWidget::CreateGearDialog* dlg =
+			new GeometryWidget::CreateGearDialog(_mainWindow, p);
 		this->showDialog(dlg);
 	}
 

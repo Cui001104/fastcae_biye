@@ -3,6 +3,7 @@
 
 #include <list>
 #include <vector>
+#include <functional>
 #include <TopoDS_Edge.hxx>
 #include <TopoDS_Wire.hxx>
 #include <TopoDS_Shape.hxx>
