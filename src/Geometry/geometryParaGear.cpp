@@ -107,6 +107,26 @@ namespace Geometry
 		return _externalGear;
 	}
 
+	void GeometryParaGear::setTipReliefAmount(double amount)
+	{
+		_tipReliefAmount = amount;
+	}
+
+	double GeometryParaGear::getTipReliefAmount()
+	{
+		return _tipReliefAmount;
+	}
+
+	void GeometryParaGear::setTipReliefLength(double length)
+	{
+		_tipReliefLength = length;
+	}
+
+	double GeometryParaGear::getTipReliefLength()
+	{
+		return _tipReliefLength;
+	}
+
 	QDomElement& GeometryParaGear::writeToProjectFile(QDomDocument* doc, QDomElement* parent)
 	{
 		QDomElement element = doc->createElement("Parameter");
@@ -157,6 +177,16 @@ namespace Geometry
 		externalEle.appendChild(externalText);
 		element.appendChild(externalEle);
 
+		QDomElement tipReliefAmountEle = doc->createElement("TipReliefAmount");
+		QDomText tipReliefAmountText = doc->createTextNode(QString::number(_tipReliefAmount));
+		tipReliefAmountEle.appendChild(tipReliefAmountText);
+		element.appendChild(tipReliefAmountEle);
+
+		QDomElement tipReliefLengthEle = doc->createElement("TipReliefLength");
+		QDomText tipReliefLengthText = doc->createTextNode(QString::number(_tipReliefLength));
+		tipReliefLengthEle.appendChild(tipReliefLengthText);
+		element.appendChild(tipReliefLengthEle);
+
 		parent->appendChild(element);
 		return element;
 	}
@@ -188,6 +218,10 @@ namespace Geometry
 				_thickness = value.toDouble();
 			else if (name == "ExternalGear")
 				_externalGear = (value == "true");
+			else if (name == "TipReliefAmount")
+				_tipReliefAmount = value.toDouble();
+			else if (name == "TipReliefLength")
+				_tipReliefLength = value.toDouble();
 		}
 	}
 }

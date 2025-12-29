@@ -5,6 +5,7 @@
 
 #include <cmath>
 #include <vector>
+#include <QDebug>
 
 #include <gp_Pnt.hxx>
 #include <gp_Dir.hxx>
@@ -83,6 +84,16 @@ namespace Command {
 		_externalGear = external;
 	}
 
+	void GeoCommandCreateGear::setTipReliefAmount(double amount)
+	{
+		_tipReliefAmount = amount;
+	}
+
+	void GeoCommandCreateGear::setTipReliefLength(double length)
+	{
+		_tipReliefLength = length;
+	}
+
 	// 渐开线极坐标角度计算
 	static double involuteAngle(double Rb, double R)
 	{
@@ -150,10 +161,60 @@ namespace Command {
 		std::vector<gp_Pnt> involuteLeft;
 		std::vector<gp_Pnt> involuteRight;
 
+		// 修型起点半径（从齿顶向下 _tipReliefLength 距离）
+		double				R_relief_start = Ra - _tipReliefLength;
+
+		// ===== 调试输出：修型参数 =====
+		qDebug() << "========== 齿轮修型参数 ==========";
+		qDebug() << "齿顶圆半径 Ra =" << Ra << "mm";
+		qDebug() << "基圆半径 Rb =" << Rb << "mm";
+		qDebug() << "修型量 Ca =" << _tipReliefAmount << "mm";
+		qDebug() << "修型长度 Lca =" << _tipReliefLength << "mm";
+		qDebug() << "修型起点半径 R_start =" << R_relief_start << "mm";
+		qDebug() << "===================================";
+
+		int reliefPointCount = 0; // 统计被修型的点数
+
 		for(int i = 0; i <= numPoints; ++i) {
-			double t		  = (double)i / numPoints;
-			double theta	  = thetaStart + t * (thetaEnd - thetaStart);
-			gp_Pnt pt		  = involutePoint(Rb, theta);
+			double t		 = (double)i / numPoints;
+			double theta	 = thetaStart + t * (thetaEnd - thetaStart);
+			gp_Pnt pt		 = involutePoint(Rb, theta);
+
+			// 计算当前点的半径
+			double R_current = std::sqrt(pt.X() * pt.X() + pt.Y() * pt.Y());
+
+			// ===== 抛物线修型 =====
+			// 如果启用修型且当前点在修型区域内
+			if(_tipReliefAmount > 0 && _tipReliefLength > 0 && R_current > R_relief_start) {
+				// 到修型起点的距离
+				double y	   = R_current - R_relief_start;
+				// 抛物线修型量: δ = Ca * (y/Lca)²
+				double delta   = _tipReliefAmount * (y / _tipReliefLength) * (y / _tipReliefLength);
+
+				// 计算该点的压力角
+				double alpha_y = std::acos(Rb / R_current);
+
+				// 简化处理：沿径向向内偏移
+				double nx	   = pt.X() / R_current; // 径向单位向量
+				double ny	   = pt.Y() / R_current;
+
+				// 调试输出：每个被修型的点
+				if(reliefPointCount < 5) { // 只输出前5个点避免刷屏
+					qDebug() << "点" << i << ": R=" << R_current << "mm, y=" << y
+							 << "mm, delta=" << delta << "mm";
+					qDebug() << "  原坐标:(" << pt.X() << "," << pt.Y() << ")";
+				}
+
+				// 向内偏移 delta 距离
+				pt.SetX(pt.X() - delta * nx);
+				pt.SetY(pt.Y() - delta * ny);
+
+				if(reliefPointCount < 5) {
+					qDebug() << "  修型后:(" << pt.X() << "," << pt.Y() << ")";
+				}
+
+				reliefPointCount++;
+			}
 
 			// 计算渐开线在分度圆处的角度偏移
 			double angleAtRef = involuteAngle(Rb, Rref);
@@ -164,6 +225,12 @@ namespace Command {
 
 			// 镜像得到另一侧渐开线
 			involuteRight.push_back(mirrorPoint(ptRotated));
+		}
+
+		// 调试输出：修型统计
+		qDebug() << "修型点数:" << reliefPointCount << "/" << (numPoints + 1);
+		if(reliefPointCount == 0 && _tipReliefAmount > 0) {
+			qDebug() << "警告: 没有点被修型! 请检查修型长度是否太小或齿顶圆半径计算是否正确";
 		}
 
 		BRepBuilderAPI_MakeWire wireBuilder;
@@ -354,6 +421,8 @@ namespace Command {
 		para->setFilletCoefficient(_filletCoeff);
 		para->setThickness(_thickness);
 		para->setExternalGear(_externalGear);
+		para->setTipReliefAmount(_tipReliefAmount);
+		para->setTipReliefLength(_tipReliefLength);
 		_res->setParameter(para);
 
 		GeoCommandBase::execute();

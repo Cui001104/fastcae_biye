@@ -47,6 +47,10 @@ namespace Command {
 		void setThickness(double t);
 		/// 设置是否为外齿轮
 		void setExternalGear(bool external);
+		/// 设置齿顶修型量 (mm)
+		void setTipReliefAmount(double amount);
+		/// 设置齿顶修型长度 (mm)
+		void setTipReliefLength(double length);
 
 	private:
 		/// 生成渐开线齿廓点
@@ -66,6 +70,8 @@ namespace Command {
 		double				   _filletCoeff{ 0.38 };
 		double				   _thickness{ 10.0 };
 		bool				   _externalGear{ true };
+		double				   _tipReliefAmount{ 0.0 }; ///< 齿顶修型量 (mm)
+		double				   _tipReliefLength{ 0.0 }; ///< 齿顶修型长度 (mm)
 
 		Geometry::GeometrySet* _res{};
 	};

@@ -73,6 +73,14 @@ namespace Geometry
 		void setExternalGear(bool external);
 		bool isExternalGear();
 
+		/// 设置/获取齿顶修型量 (mm)
+		void setTipReliefAmount(double amount);
+		double getTipReliefAmount();
+
+		/// 设置/获取齿顶修型长度 (mm)
+		void setTipReliefLength(double length);
+		double getTipReliefLength();
+
 		/// 数据写入工程文件
 		QDomElement& writeToProjectFile(QDomDocument* doc, QDomElement* parent) override;
 		/// 从工程文件读入数据
@@ -88,6 +96,8 @@ namespace Geometry
 		double _filletCoeff{ 0.38 };    ///< 齿根圆角系数
 		double _thickness{ 10.0 };      ///< 齿轮厚度 (mm)
 		bool _externalGear{ true };     ///< 是否为外齿轮
+		double _tipReliefAmount{ 0.0 }; ///< 齿顶修型量 (mm)，0表示不修型
+		double _tipReliefLength{ 0.0 }; ///< 齿顶修型长度 (mm)
 	};
 }
 

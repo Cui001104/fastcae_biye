@@ -64,6 +64,8 @@ namespace GeometryWidget {
 			_ui->doubleSpinBoxFillet->setValue(p->getFilletCoefficient());
 			_ui->doubleSpinBoxThickness->setValue(p->getThickness());
 			_ui->comboBoxGearType->setCurrentIndex(p->isExternalGear() ? 0 : 1);
+			_ui->doubleSpinBoxTipReliefAmount->setValue(p->getTipReliefAmount());
+			_ui->doubleSpinBoxTipReliefLength->setValue(p->getTipReliefLength());
 		}
 	}
 
@@ -75,14 +77,16 @@ namespace GeometryWidget {
 
 	void CreateGearDialog::accept()
 	{
-		int	   numberOfTeeth = _ui->spinBoxTeeth->value();
-		double module		 = _ui->doubleSpinBoxModule->value();
-		double pressureAngle = _ui->doubleSpinBoxPressureAngle->value();
-		double addendumCoeff = _ui->doubleSpinBoxAddendum->value();
-		double dedendumCoeff = _ui->doubleSpinBoxDedendum->value();
-		double filletCoeff	 = _ui->doubleSpinBoxFillet->value();
-		double thickness	 = _ui->doubleSpinBoxThickness->value();
-		bool   externalGear	 = (_ui->comboBoxGearType->currentIndex() == 0);
+		int	   numberOfTeeth   = _ui->spinBoxTeeth->value();
+		double module		   = _ui->doubleSpinBoxModule->value();
+		double pressureAngle   = _ui->doubleSpinBoxPressureAngle->value();
+		double addendumCoeff   = _ui->doubleSpinBoxAddendum->value();
+		double dedendumCoeff   = _ui->doubleSpinBoxDedendum->value();
+		double filletCoeff	   = _ui->doubleSpinBoxFillet->value();
+		double thickness	   = _ui->doubleSpinBoxThickness->value();
+		bool   externalGear	   = (_ui->comboBoxGearType->currentIndex() == 0);
+		double tipReliefAmount = _ui->doubleSpinBoxTipReliefAmount->value();
+		double tipReliefLength = _ui->doubleSpinBoxTipReliefLength->value();
 
 		// 参数验证
 		if(numberOfTeeth < 3) {
@@ -112,6 +116,8 @@ namespace GeometryWidget {
 		command->setFilletCoefficient(filletCoeff);
 		command->setThickness(thickness);
 		command->setExternalGear(externalGear);
+		command->setTipReliefAmount(tipReliefAmount);
+		command->setTipReliefLength(tipReliefLength);
 		command->setName(name);
 
 		if(_isEdit)
