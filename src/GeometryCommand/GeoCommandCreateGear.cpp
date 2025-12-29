@@ -11,6 +11,7 @@
 #include <gp_Vec.hxx>
 #include <gp_Ax2.hxx>
 #include <gp_Circ.hxx>
+#include <gp_Pln.hxx>
 
 #include <TopoDS.hxx>
 #include <TopoDS_Wire.hxx>
@@ -126,7 +127,7 @@ namespace Command {
 		double Rf	= Rref - _dedendumCoeff * m; // 齿根圆半径
 
 		// 确保齿根圆不小于一个合理值
-		if(Rf < 0.1 * m)
+		if(Rf < 0)
 			Rf = 0.1 * m;
 
 		// 角度计算
@@ -225,22 +226,61 @@ namespace Command {
 			gp_Pnt nextRootLeft = rotatePoint(involuteLeft.front(), toothAngle + angularPitch);
 
 			if(rootRight.Distance(nextRootLeft) > 1e-6) {
-				// 齿根圆弧中点
-				double rootMidAngle = toothAngle + angularPitch / 2.0 + toothThicknessHalfAngle;
-				gp_Pnt rootMid(Rf * std::cos(rootMidAngle), Rf * std::sin(rootMidAngle), 0);
+				// 计算齿根圆弧的起始和结束角度
+				double rootRightAngle	 = std::atan2(rootRight.Y(), rootRight.X());
+				double nextRootLeftAngle = std::atan2(nextRootLeft.Y(), nextRootLeft.X());
 
-				try {
-					GC_MakeArcOfCircle arcMaker(rootRight, rootMid, nextRootLeft);
-					if(arcMaker.IsDone()) {
-						TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker.Value());
-						wireBuilder.Add(arcEdge);
-					} else {
+				// 确保角度连续（处理跨越0度的情况）
+				if(nextRootLeftAngle < rootRightAngle) {
+					nextRootLeftAngle += 2.0 * M_PI;
+				}
+
+				// 计算齿根圆弧的角度跨度
+				double rootArcSpan = nextRootLeftAngle - rootRightAngle;
+
+				// 如果圆弧角度超过180度，限制为180度
+				if(rootArcSpan > M_PI) {
+					// 计算180度圆弧的终点角度
+					double limitedEndAngle = rootRightAngle + M_PI;
+					// 圆弧中点（恰好在起点偏移90度处）
+					double rootMidAngle	   = rootRightAngle + M_PI / 2.0;
+					gp_Pnt rootMid(Rf * std::cos(rootMidAngle), Rf * std::sin(rootMidAngle), 0);
+					// 180度圆弧的终点
+					gp_Pnt arcEnd(Rf * std::cos(limitedEndAngle), Rf * std::sin(limitedEndAngle),
+								  0);
+
+					try {
+						// 创建180度圆弧
+						GC_MakeArcOfCircle arcMaker(rootRight, rootMid, arcEnd);
+						if(arcMaker.IsDone()) {
+							wireBuilder.Add(BRepBuilderAPI_MakeEdge(arcMaker.Value()));
+						}
+					} catch(...) {
+					}
+
+					// 用直线连接剩余部分（从圆弧终点到下一个齿的渐开线起点）
+					if(arcEnd.Distance(nextRootLeft) > 1e-6) {
+						TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(arcEnd, nextRootLeft);
+						wireBuilder.Add(edge);
+					}
+				} else {
+					// 圆弧角度不超过180度，正常处理
+					double rootMidAngle = (rootRightAngle + nextRootLeftAngle) / 2.0;
+					gp_Pnt rootMid(Rf * std::cos(rootMidAngle), Rf * std::sin(rootMidAngle), 0);
+
+					try {
+						GC_MakeArcOfCircle arcMaker(rootRight, rootMid, nextRootLeft);
+						if(arcMaker.IsDone()) {
+							TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker.Value());
+							wireBuilder.Add(arcEdge);
+						} else {
+							TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
+							wireBuilder.Add(edge);
+						}
+					} catch(...) {
 						TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
 						wireBuilder.Add(edge);
 					}
-				} catch(...) {
-					TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
-					wireBuilder.Add(edge);
 				}
 			}
 		}
@@ -250,8 +290,10 @@ namespace Command {
 
 	TopoDS_Shape GeoCommandCreateGear::extrudeProfile(const TopoDS_Wire& profile)
 	{
-		// 从轮廓线创建面
-		BRepBuilderAPI_MakeFace faceMaker(profile);
+		// 在XY平面上创建面
+		gp_Pln					plane(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1));
+		BRepBuilderAPI_MakeFace faceMaker(plane, profile,
+										  Standard_True); // Standard_True 表示检查并修复 wire
 		if(!faceMaker.IsDone()) {
 			return TopoDS_Shape();
 		}
