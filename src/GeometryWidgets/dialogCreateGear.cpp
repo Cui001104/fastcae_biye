@@ -77,15 +77,24 @@ namespace GeometryWidget {
 
 	void CreateGearDialog::accept()
 	{
+		//20260118 cui 变位系数
+		double profileShiftCoefficient =_ui->doubleSpinBoxCoefficient->value();
+		double profileShiftCoefficient2 = _ui->doubleSpinBoxCoefficient2->value();
 		int	   numberOfTeeth   = _ui->spinBoxTeeth->value();
+		//cui 20260118 第二个齿轮的齿数 
+		int    numberOfSecondTeeth = _ui->spinBoxTeeth2 ->value();
 		double module		   = _ui->doubleSpinBoxModule->value();
 		double pressureAngle   = _ui->doubleSpinBoxPressureAngle->value();
 		double addendumCoeff   = _ui->doubleSpinBoxAddendum->value();
 		double dedendumCoeff   = _ui->doubleSpinBoxDedendum->value();
 		double filletCoeff	   = _ui->doubleSpinBoxFillet->value();
 		double thickness	   = _ui->doubleSpinBoxThickness->value();
+		double thickness2       = _ui->doubleSpinBoxThickness2->value();//cui 20260118 第二个齿轮的齿厚
 		bool   externalGear	   = (_ui->comboBoxGearType->currentIndex() == 0);
 		double tipReliefAmount = _ui->doubleSpinBoxTipReliefAmount->value();
+		//cui 20260118 第二个齿轮的齿顶修形量
+		double tipReliefAmount2 =_ui->doubleSpinBoxTipReliefAmount2->value();
+		double tipReliefLength2 =_ui->doubleSpinBoxTipReliefLength2->value();
 		double tipReliefLength = _ui->doubleSpinBoxTipReliefLength->value();
 
 		// 参数验证
@@ -119,6 +128,13 @@ namespace GeometryWidget {
 		command->setTipReliefAmount(tipReliefAmount);
 		command->setTipReliefLength(tipReliefLength);
 		command->setName(name);
+		// 设置变位系数
+		command->setprofileShiftCoefficient1(profileShiftCoefficient);
+		command->setprofileShiftCoefficient2(profileShiftCoefficient2);
+		// 设置第二个齿轮的参数
+		command->setNumberOfSecondTeeth(numberOfSecondTeeth);
+		command->setTipReliefAmount2(tipReliefAmount2);
+		command->setTipReliefLength2(tipReliefLength2);
 
 		if(_isEdit)
 			command->setEditData(_editSet);

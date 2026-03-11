@@ -33,6 +33,7 @@ namespace Command {
 		void setName(QString name);
 		/// 设置齿数
 		void setNumberOfTeeth(int n);
+		void setNumberOfSecondTeeth(int n);
 		/// 设置模数 (mm)
 		void setModule(double m);
 		/// 设置压力角 (度)
@@ -51,18 +52,25 @@ namespace Command {
 		void setTipReliefAmount(double amount);
 		/// 设置齿顶修型长度 (mm)
 		void setTipReliefLength(double length);
+		void setTipReliefAmount2(double amount);
+		void setTipReliefLength2(double length);
+		//变位系数
+		void setprofileShiftCoefficient1(double coefficient1);
+		void setprofileShiftCoefficient2(double coefficient2);
 
 	private:
 		/// 生成渐开线齿廓点
 		void		 generateInvolutePoints(std::vector<gp_Pnt>& points);
 		/// 创建齿轮2D轮廓线
 		TopoDS_Wire	 createGearProfile();
+		TopoDS_Wire createSecondGearProfile();
 		/// 拉伸生成3D齿轮
 		TopoDS_Shape extrudeProfile(const TopoDS_Wire& profile);
 
 	private:
 		QString				   _name{};
 		int					   _numberOfTeeth{ 26 };
+		int                    _numberOfSecondTeeth{ 26 };
 		double				   _module{ 2.5 };
 		double				   _pressureAngle{ 20.0 };
 		double				   _addendumCoeff{ 1.0 };
@@ -72,6 +80,10 @@ namespace Command {
 		bool				   _externalGear{ true };
 		double				   _tipReliefAmount{ 0.0 }; ///< 齿顶修型量 (mm)
 		double				   _tipReliefLength{ 0.0 }; ///< 齿顶修型长度 (mm)
+		double				   _tipReliefAmount2{ 0.0 };
+		double                 _tipReliefLength2{ 0.0 };
+		double				   _x1 { 0.0 };
+		double				   _x2{ 0.0 };//第二个齿轮的变位系数
 
 		Geometry::GeometrySet* _res{};
 	};
