@@ -31,6 +31,7 @@
 #include <Geom_BezierCurve.hxx>
 #include <TColgp_Array1OfPnt.hxx>
 #include <GC_MakeArcOfCircle.hxx>
+#include <Standard_Failure.hxx>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -423,17 +424,30 @@ namespace Command {
 				// 计算齿根圆弧的起始和结束角度
 				double rootRightAngle	 = std::atan2(rootRight.Y(), rootRight.X());
 				double nextRootLeftAngle = std::atan2(nextRootLeft.Y(), nextRootLeft.X());
+				qDebug() << " 第一个齿轮 cya 0312 ========== 齿根点调试信息 ==========";
+qDebug() << "toothAngle:" << toothAngle << "rad (" << toothAngle * 180/M_PI << "°)";
+qDebug() << "angularPitch:" << angularPitch << "rad (" << angularPitch * 180/M_PI << "°)";
+qDebug() << "next tooth angle:" << toothAngle + angularPitch << "rad (" 
+         << (toothAngle + angularPitch) * 180/M_PI << "°)";
+
+qDebug() << "\n--- 当前齿右侧渐开线起点 ---";
+qDebug() << "原始点 (involuteRight.front()):";
+qDebug() << "  X:" << involuteRight.front().X();
+qDebug() << "  Y:" << involuteRight.front().Y();
+qDebug() << "  Z:" << involuteRight.front().Z();
 
 				// 确保角度连续（处理跨越0度的情况）
 				if(nextRootLeftAngle < rootRightAngle) {
 					nextRootLeftAngle += 2.0 * M_PI;
+					qDebug() << "cya 0312调整后nextRootLeft角度:" << nextRootLeftAngle * 180/M_PI << "°";
 				}
 
 				// 计算齿根圆弧的角度跨度
 				double rootArcSpan = nextRootLeftAngle - rootRightAngle;
-
+				qDebug() << "cya 0312角度差:" <<rootArcSpan;
 				// 如果圆弧角度超过180度，限制为180度
 				if(rootArcSpan > M_PI) {
+					qDebug() <<"齿根圆大于180度，使用180度圆弧";
 					// 计算180度圆弧的终点角度
 					double limitedEndAngle = rootRightAngle + M_PI;
 					// 圆弧中点（恰好在起点偏移90度处）
@@ -458,28 +472,100 @@ namespace Command {
 						wireBuilder.Add(edge);
 					}
 				} else {
+					qDebug() <<"齿根圆小于180";
+					// 角度跨度过小则用直线，避免 GC_MakeArcOfCircle 抛出 StdFail_NotDone
+					const double minRootArcSpan = 1e-6;
+					if(rootArcSpan < minRootArcSpan) {
+						TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
+						wireBuilder.Add(edge);
+						qDebug() << "齿根圆弧角度跨度过小，使用直线连接";
+					} else {
 					// 圆弧角度不超过180度，正常处理
 					double rootMidAngle = (rootRightAngle + nextRootLeftAngle) / 2.0;
 					gp_Pnt rootMid(Rf * std::cos(rootMidAngle), Rf * std::sin(rootMidAngle), 0);
-
-					try {
-						GC_MakeArcOfCircle arcMaker(rootRight, rootMid, nextRootLeft);
-						if(arcMaker.IsDone()) {
-							TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker.Value());
-							wireBuilder.Add(arcEdge);
-						} else {
-							TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
-							wireBuilder.Add(edge);
-						}
-					} catch(...) {
-						TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
-						wireBuilder.Add(edge);
-					}
+					qDebug() << "中点角度:" << rootMidAngle * 180/M_PI << "°";
+					qDebug() << "中点坐标: (" << rootMid.X() << "," << rootMid.Y() << ")";
+					// 验证三点是否共线
+					double det = rootRight.X() * (rootMid.Y() - nextRootLeft.Y()) +
+					rootMid.X() * (nextRootLeft.Y() - rootRight.Y()) +
+					nextRootLeft.X() * (rootRight.Y() - rootMid.Y());
+	   qDebug() << "三点共线检测 (det):" << det;
+	   if(qAbs(det) < 1e-10) {
+		   qDebug() << "警告：三点接近共线，无法创建圆弧！";
+	   }
+	   // 当三点接近共线(|det|较小)时，三点法会得到退化弧(显示为直线)，改用圆心法保证齿根为圆弧
+	   const double detThreshold = 0.1;
+	   bool useCircleMethod = (qAbs(det) < detThreshold);
+	   if(useCircleMethod) {
+		   qDebug() << "det 过小，改用圆心法创建齿根圆弧";
+	   }
+	   try {
+		if(useCircleMethod) {
+			// 圆心法：在齿根圆上按角度创建圆弧，数值稳定
+			gp_Circ circle(gp_Ax2(gp_Pnt(0,0,0), gp_Dir(0,0,1)), Rf);
+			GC_MakeArcOfCircle arcMaker2(circle, rootRightAngle, nextRootLeftAngle, true);
+			if(arcMaker2.IsDone()) {
+				TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker2.Value());
+				wireBuilder.Add(arcEdge);
+				qDebug() << "圆心法创建齿根圆弧成功";
+			} else {
+				TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
+				wireBuilder.Add(edge);
+				qDebug() << "圆心法失败，使用直线替代";
+			}
+		} else {
+			GC_MakeArcOfCircle arcMaker(rootRight, rootMid, nextRootLeft);
+			if(arcMaker.IsDone()) {
+				qDebug() << "圆弧创建成功！";
+				TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker.Value());
+				wireBuilder.Add(arcEdge);
+			} else {
+				qDebug() << "圆弧创建失败，使用圆心法";
+				gp_Circ circle(gp_Ax2(gp_Pnt(0,0,0), gp_Dir(0,0,1)), Rf);
+				GC_MakeArcOfCircle arcMaker2(circle, rootRightAngle, nextRootLeftAngle, true);
+				if(arcMaker2.IsDone()) {
+					TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker2.Value());
+					wireBuilder.Add(arcEdge);
+					qDebug() << "使用圆心法创建圆弧成功";
+				} else {
+					TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
+					wireBuilder.Add(edge);
+					qDebug() << "使用直线替代";
+				}
+			}
+		}
+	   } catch(...) {
+		qDebug() << "异常，使用圆心法创建圆弧";
+		try {
+			gp_Circ circle(gp_Ax2(gp_Pnt(0,0,0), gp_Dir(0,0,1)), Rf);
+			GC_MakeArcOfCircle arcMaker2(circle, rootRightAngle, nextRootLeftAngle, true);
+			if(arcMaker2.IsDone()) {
+				TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker2.Value());
+				wireBuilder.Add(arcEdge);
+			} else {
+				TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
+				wireBuilder.Add(edge);
+			}
+		} catch(...) {
+			TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
+			wireBuilder.Add(edge);
+		}
+	   }
+					} // rootArcSpan >= minRootArcSpan
 				}
 			}
 		}
 
-		return wireBuilder.Wire();
+		if(!wireBuilder.IsDone()) {
+			qDebug() << "第一个齿轮 Wire 构建未完成 (IsDone 为 false)";
+			return TopoDS_Wire();
+		}
+		try {
+			return wireBuilder.Wire();
+		} catch(Standard_Failure& e) {
+			qDebug() << "第一个齿轮 Wire() 异常:" << e.GetMessageString();
+			return TopoDS_Wire();
+		}
 	}
 
 	TopoDS_Wire GeoCommandCreateGear::createSecondGearProfile()
@@ -747,17 +833,29 @@ namespace Command {
 				// 计算齿根圆弧的起始和结束角度
 				double rootRightAngle	 = std::atan2(rootRight.Y(), rootRight.X());
 				double nextRootLeftAngle = std::atan2(nextRootLeft.Y(), nextRootLeft.X());
+				qDebug() << " 第二个齿轮 cya 0312 ========== 齿根点调试信息 ==========";
+				qDebug() << "toothAngle:" << toothAngle << "rad (" << toothAngle * 180/M_PI << "°)";
+				qDebug() << "angularPitch:" << angularPitch << "rad (" << angularPitch * 180/M_PI << "°)";
+				qDebug() << "next tooth angle:" << toothAngle + angularPitch << "rad ("
+				         << (toothAngle + angularPitch) * 180/M_PI << "°)";
+				qDebug() << "\n--- 当前齿右侧渐开线起点 ---";
+				qDebug() << "原始点 (involuteRight.front()):";
+				qDebug() << "  X:" << involuteRight.front().X();
+				qDebug() << "  Y:" << involuteRight.front().Y();
+				qDebug() << "  Z:" << involuteRight.front().Z();
 
 				// 确保角度连续（处理跨越0度的情况）
 				if(nextRootLeftAngle < rootRightAngle) {
 					nextRootLeftAngle += 2.0 * M_PI;
+					qDebug() << "cya 0312调整后nextRootLeft角度:" << nextRootLeftAngle * 180/M_PI << "°";
 				}
 
 				// 计算齿根圆弧的角度跨度
 				double rootArcSpan = nextRootLeftAngle - rootRightAngle;
-
+				qDebug() << "cya 0312角度差:" << rootArcSpan;
 				// 如果圆弧角度超过180度，限制为180度
 				if(rootArcSpan > M_PI) {
+					qDebug() << "齿根圆大于180度，使用180度圆弧";
 					// 计算180度圆弧的终点角度
 					double limitedEndAngle = rootRightAngle + M_PI;
 					// 圆弧中点（恰好在起点偏移90度处）
@@ -781,22 +879,56 @@ namespace Command {
 						wireBuilder.Add(edge);
 					}
 				} else {
+					qDebug() << "齿根圆小于180";
 					// 圆弧角度不超过180度，正常处理
 					double rootMidAngle = (rootRightAngle + nextRootLeftAngle) / 2.0;
 					gp_Pnt rootMid(Rf * std::cos(rootMidAngle), Rf * std::sin(rootMidAngle), 0);
-
+					qDebug() << "中点角度:" << rootMidAngle * 180/M_PI << "°";
+					qDebug() << "中点坐标: (" << rootMid.X() << "," << rootMid.Y() << ")";
+					// 验证三点是否共线
+					double det = rootRight.X() * (rootMid.Y() - nextRootLeft.Y()) +
+						rootMid.X() * (nextRootLeft.Y() - rootRight.Y()) +
+						nextRootLeft.X() * (rootRight.Y() - rootMid.Y());
+					qDebug() << "三点共线检测 (det):" << det;
+					if(qAbs(det) < 1e-10) {
+						qDebug() << "警告：三点接近共线，无法创建圆弧！";
+					}
 					try {
 						GC_MakeArcOfCircle arcMaker(rootRight, rootMid, nextRootLeft);
 						if(arcMaker.IsDone()) {
+							qDebug() << "圆弧创建成功！";
 							TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker.Value());
 							wireBuilder.Add(arcEdge);
 						} else {
+							qDebug() << "圆弧创建失败，使用三点圆弧的替代方法";
+							gp_Circ circle(gp_Ax2(gp_Pnt(0,0,0), gp_Dir(0,0,1)), Rf);
+							GC_MakeArcOfCircle arcMaker2(circle, rootRightAngle, nextRootLeftAngle, true);
+							if(arcMaker2.IsDone()) {
+								TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker2.Value());
+								wireBuilder.Add(arcEdge);
+								qDebug() << "使用圆心法创建圆弧成功";
+							} else {
+								TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
+								wireBuilder.Add(edge);
+								qDebug() << "使用直线替代";
+							}
+						}
+					} catch(...) {
+						qDebug() << "异常，使用圆心法创建圆弧";
+						try {
+							gp_Circ circle(gp_Ax2(gp_Pnt(0,0,0), gp_Dir(0,0,1)), Rf);
+							GC_MakeArcOfCircle arcMaker2(circle, rootRightAngle, nextRootLeftAngle, true);
+							if(arcMaker2.IsDone()) {
+								TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker2.Value());
+								wireBuilder.Add(arcEdge);
+							} else {
+								TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
+								wireBuilder.Add(edge);
+							}
+						} catch(...) {
 							TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
 							wireBuilder.Add(edge);
 						}
-					} catch(...) {
-						TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
-						wireBuilder.Add(edge);
 					}
 				}
 			}
