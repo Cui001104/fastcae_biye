@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file mainWindow.h
  * @brief 主窗口类头文件
  * @author FastCAE研发小组(fastcae@diso.cn)
@@ -32,6 +32,7 @@
 #include <QMainWindow>
 #include <QPair>
 #include <QString>
+#include <QStringList>
 // ribbon customize
 #include "SARibbonBar/SARibbonActionsManager.h"
 #include "SARibbonBar/SARibbonCustomizeWidget.h"
@@ -199,7 +200,7 @@ namespace GUI {
 		void removeGeometryActorSig(int index);
 		void highLightGeometrySetSig(Geometry::GeometrySet* s, bool on);
 		/****网格相关信号***** */
-		void importMeshByNamesSig(QString name);
+		void importMeshByNamesSig(QStringList names);
 		void importMeshDataSetSig(vtkDataSet* dataset);
 		//		void exportMeshByIDSig(QString fileName, QString suffix, int kID);
 		void editMeshSig(int dim, int kindex);

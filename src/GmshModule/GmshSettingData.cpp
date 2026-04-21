@@ -1,4 +1,4 @@
-﻿#include "GmshSettingData.h"
+#include "GmshSettingData.h"
 #include "GmshThread.h"
 #include "GmshDialogBase.h"
 #include "LocalField.h"
@@ -37,6 +37,7 @@ namespace Gmsh{
 		this->setSizeFactor(d->getSizeFactor());
 		this->setMinSize(d->getMinSize());
 		this->setMaxSize(d->getMaxSize());
+		this->setBoreNodeTolerance(d->getBoreNodeTolerance());
 		this->setGeoClean(d->getGeoClean());
 		this->setGridCoplanar(d->getGridCoplanar());
 		this->setSmoothIteration(d->getSmoothIteration());
@@ -121,6 +122,16 @@ namespace Gmsh{
 	double GmshSettingData::getMaxSize()
 	{
 		return _maxSize;
+	}
+
+	void GmshSettingData::setBoreNodeTolerance(double tol)
+	{
+		_boreNodeTolerance = tol;
+	}
+
+	double GmshSettingData::getBoreNodeTolerance()
+	{
+		return _boreNodeTolerance;
 	}
 
 	void GmshSettingData::setGeoClean(bool c)
@@ -445,3 +456,5 @@ namespace Gmsh{
 	}
 
 }
+
+

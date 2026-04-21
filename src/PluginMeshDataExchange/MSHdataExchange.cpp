@@ -1,4 +1,4 @@
-﻿#include "MSHdataExchange.h"
+#include "MSHdataExchange.h"
 #include "MeshData/meshSingleton.h"
 #include "MeshData/meshKernal.h"
 #include "MeshData/meshSet.h"
@@ -45,7 +45,8 @@ namespace MeshData {
 
 	bool MSHdataExchange::write()
 	{
-		return _modelId >= 1;
+		// 当前仅实现了MSH读入，写出流程尚未实现
+		return false;
 	}
 
 	void MSHdataExchange::run()
@@ -60,8 +61,8 @@ namespace MeshData {
 				break;
 			case MESH_WRITE:
 				emit showInformation(tr("Export MSH Mesh File From \"%1\"").arg(_fileName));
-				//			result = write();
-				//			setWriteResult(result);
+				result = write();
+				setWriteResult(result);
 				break;
 		}
 		defaultMeshFinished();

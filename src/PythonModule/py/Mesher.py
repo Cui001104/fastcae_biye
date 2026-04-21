@@ -1,4 +1,4 @@
-# -------关联C++库---------------
+# -------关联C++�?--------------
 import ctypes
 import platform
 import os
@@ -50,6 +50,7 @@ class Gmsher:
         self.selectvisible = False
         self.cleanGeome = False
         self.meshID = -1
+        self.boreNodeTolerance = -1.0
 
     def appendSurface(self, geoset, index):
         self.surfaceList.setdefault(geoset, set()).add(index)
@@ -126,6 +127,9 @@ class Gmsher:
     def setMeshID(self, id):
         self.meshID = id
 
+    def setBoreNodeTolerance(self, tol):
+        self.boreNodeTolerance = tol
+
     def appendToDimension(self, dim):
         self.dimensionList.append(dim)
 
@@ -186,7 +190,7 @@ class Gmsher:
                                           self.sizeFactor),
                                       c_double(self.minSize), c_double(self.maxSize), c_bool(
                                           self.cleanGeome), c_bool(self.isGridCoplanar),
-                                      pointsizestr, fieldsStr, c_bool(self.selectall), c_bool(self.selectvisible), c_int(self.meshID))
+                                      pointsizestr, fieldsStr, c_bool(self.selectall), c_bool(self.selectvisible), c_double(self.boreNodeTolerance), c_int(self.meshID))
 
         elif self.dim == 3:
             keyList = self.solidList.keys()
@@ -203,7 +207,7 @@ class Gmsher:
             gmshPlugin.GenerateMesh3D(objstr, eletypestr, c_int(self.elementOrder), c_int(self.method), c_double(self.sizeFactor),
                                       c_double(self.minSize), c_double(self.maxSize), c_bool(
                                           self.cleanGeome), c_bool(self.isGridCoplanar),
-                                      pointsizestr, fieldsStr, c_bool(self.selectall), c_bool(self.selectvisible), c_int(self.meshID))
+                                      pointsizestr, fieldsStr, c_bool(self.selectall), c_bool(self.selectvisible), c_double(self.boreNodeTolerance), c_int(self.meshID))
 
         del self
 
@@ -242,3 +246,5 @@ class Gmsher:
             self.elementOrder), c_int(self.method), c_double(self.fluidsize))
 
         del self
+
+

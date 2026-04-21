@@ -1,4 +1,4 @@
-﻿#ifndef GMSH_PY_H__
+#ifndef GMSH_PY_H__
 #define GMSH_PY_H__
 
 #include <QMultiHash>
@@ -31,10 +31,10 @@ namespace Gmsh
 	 
 		static void GenerateMesh3D(char* solids, char* type, int order, int method, double factor, double sizemin, 
 			double sizemax, bool clean, bool isGridCoplanar, char* points, char* fields/*, char* physicals*/, 
-			bool selectall, bool selectvisible, int meshID/*, char* cells*/);
+			bool selectall, bool selectvisible, double boreNodeTolerance, int meshID/*, char* cells*/);
 		static void GenerateMesh2D(char* solids, char* type, int order, int method, int smooth,	double factor, 
 			double sizemin,	double sizemax, bool clean, bool isGridCoplanar, char* points, char* fields/*, char* physicals*/, 
-			bool selectall, bool selectvisible, int meshID/*, char* cells*/);
+			bool selectall, bool selectvisible, double boreNodeTolerance, int meshID/*, char* cells*/);
 		static void generateFluidMesh(char* solids, char* type, char* fluids, int order, int method, double size);
 
 	private:
@@ -52,12 +52,13 @@ extern "C"
 {
 	void GMSHAPI GenerateMesh3D(char* solids, char* type, int order, int method, double factor, 
 		double sizemin, double sizemax, bool clean, bool isGridCoplanar, char* points, 
-		char* fields/*, char* physicals*/,bool selectall, bool selectvisible, int meshID
+		char* fields/*, char* physicals*/,bool selectall, bool selectvisible, double boreNodeTolerance, int meshID
 		/*char* cells*/);
 	void GMSHAPI GenerateMesh2D(char* solids, char* type, int order, int method, int smooth, double factor, 
 		double sizemin, double sizemax, bool clean, bool isGridCoplanar, char* points, 
-		char* fields/*, char* physicals*/, bool selectall, bool selectvisible, int meshID/*, char* cells*/);
+		char* fields/*, char* physicals*/, bool selectall, bool selectvisible, double boreNodeTolerance, int meshID/*, char* cells*/);
 	void GMSHAPI generateFluidMesh(char* solids, char* type, char* fluids, int order, int method, double size);
 }
 
 #endif // !GMSH_PY_H__
+

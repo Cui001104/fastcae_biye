@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file mainWindow.cpp
  * @brief 主窗口类源文件
  * @author FastCAE研发小组(fastcae@diso.cn)
@@ -664,18 +664,8 @@ namespace GUI {
 			return;
 		}
 
-		QStringList meshsuffix =
-			ConfigOption::ConfigOption::getInstance()->getMeshConfig()->getExportSuffix().split(
-				";");
-		QStringList list;
-
-		for(QString s : meshsuffix) {
-			for(int i = 0; i < suffixlist.size(); i++) {
-				QString suffix = suffixlist.at(i);
-				if(suffix.contains(s))
-					list.append(suffix);
-			}
-		}
+		// 直接展示所有已注册导出格式，避免旧配置(如仅 vtk;neu)把 key 等格式过滤掉
+		QStringList list = suffixlist;
 
 		std::sort(list.begin(), list.end());
 		QString suffixes   = list.join(";;");

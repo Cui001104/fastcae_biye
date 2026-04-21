@@ -1,4 +1,4 @@
-ï»¿#ifndef GMSHSETTINGDATA_H
+#ifndef GMSHSETTINGDATA_H
 #define GMSHSETTINGDATA_H
 
 #include <QList>
@@ -20,71 +20,75 @@ namespace Gmsh{
 		
 		void copy(DataBase* data) override;
 
-		//è®¾ç½®å®ä½“Hash
+		//ÉèÖÃÊµÌåHash
 		void setSolidHash(QMultiHash<int, int> sh);
-		//è·å–å®ä½“Hash
+		//»ñÈ¡ÊµÌåHash
 		QMultiHash<int, int> getSolidHash();
-		//è®¾ç½®é¢å‰–åˆ†Hash
+		//ÉèÖÃÃæÆÊ·ÖHash
 		void setSurfaceHash(QMultiHash<int, int> sh);
-		//è·å–é¢å‰–åˆ†Hash
+		//»ñÈ¡ÃæÆÊ·ÖHash
 		QMultiHash<int, int> getSurfaceHash();
-		//è®¾ç½®å‰–åˆ†ç±»å‹
+		//ÉèÖÃÆÊ·ÖÀàĞÍ
 		void setElementType(QString type);
-		//è·å–å‰–åˆ†ç±»å‹
+		//»ñÈ¡ÆÊ·ÖÀàĞÍ
 		QString getElementType();
-		//è®¾ç½®å‰–åˆ†é˜¶æ¬¡
+		//ÉèÖÃÆÊ·Ö½×´Î
 		void setElementOrder(int order);
-		//è·å–å‰–åˆ†é˜¶æ¬¡
+		//»ñÈ¡ÆÊ·Ö½×´Î
 		int getElementOrder();
-		//è®¾ç½®å‰–åˆ†æ–¹æ³•
+		//ÉèÖÃÆÊ·Ö·½·¨
 		void setMethod(int m);
-		//è·å–å‰–åˆ†æ–¹æ³•
+		//»ñÈ¡ÆÊ·Ö·½·¨
 		int getMethod();
-		//è®¾ç½®å°ºå¯¸å› å­
+		//ÉèÖÃ³ß´çÒò×Ó
 		void setSizeFactor(double sf);
-		//è·å–å°ºå¯¸å› å­
+		//»ñÈ¡³ß´çÒò×Ó
 		double getSizeFactor();
-		//è®¾ç½®æœ€å°å°ºå¯¸
+		//ÉèÖÃ×îĞ¡³ß´ç
 		void setMinSize(double min);
-		//è·å–æœ€å°å°ºå¯¸
+		//»ñÈ¡×îĞ¡³ß´ç
 		double getMinSize();
-		//è®¾ç½®æœ€å¤§å°ºå¯¸
+		//ÉèÖÃ×î´ó³ß´ç
 		void setMaxSize(double max);
-		//è·å–æœ€å¤§å°ºå¯¸
+		//»ñÈ¡×î´ó³ß´ç
 		double getMaxSize();
-		//è®¾ç½®ç½‘æ ¼æ¸…ç†
+		//ÉèÖÃÍø¸ñÇåÀí
 		void setGeoClean(bool c);
-		//è·å–ç½‘æ ¼æ¸…ç†
+		//»ñÈ¡Íø¸ñÇåÀí
 		bool getGeoClean();
-		//è®¾ç½®å…‰æ»‘åº¦
+		//ÉèÖÃ¹â»¬¶È
 		void setSmoothIteration(int smooth);
-		//è·å–å…‰æ»‘åº¦
+		//»ñÈ¡¹â»¬¶È
 		int getSmoothIteration();
-		//è®¾ç½®ç½‘æ ¼è¿è´¯æ€§
+		//ÉèÖÃÍø¸ñÁ¬¹áĞÔ
 		void setGridCoplanar(bool gc);
-		//è·å–ç½‘æ ¼è¿è´¯æ€§ 
+		//»ñÈ¡Íø¸ñÁ¬¹áĞÔ 
 		bool getGridCoplanar();
-		//è®¾ç½®å±€éƒ¨å¯†åº¦
+		//ÉèÖÃ¾Ö²¿ÃÜ¶È
 		void setSizeAtPoints(QString ps);
 		void setSizeFields(QString fs);
 		void setLocalDesities(QList<LocalDensity*> list);
-		//è·å–å±€éƒ¨å¯†åº¦
+		//»ñÈ¡¾Ö²¿ÃÜ¶È
 		QList<LocalDensity*> getLocalDesities();
-		//è®¾ç½®å…¨é€‰çŠ¶æ€
+		//ÉèÖÃÈ«Ñ¡×´Ì¬
 		void setSelectAll(bool b);
-		//è·å–å…¨é€‰çŠ¶æ€
+		//»ñÈ¡È«Ñ¡×´Ì¬
 		bool getSelectAll();
-		//è®¾ç½®é€‰æ‹©å¯è§é¡¹çŠ¶æ€
+		//ÉèÖÃÑ¡Ôñ¿É¼ûÏî×´Ì¬
 		void setSelectVisiable(bool b);
-		//è·å–é€‰æ‹©å¯è§é¡¹çŠ¶æ€
+		//»ñÈ¡Ñ¡Ôñ¿É¼ûÏî×´Ì¬
 		bool getSelectVisiable();
-		//è®¾ç½®ç½‘æ ¼ç¼–å·
+		//ÉèÖÃÍø¸ñ±àºÅ
 		void setMeshID(int id);
-		//è·å–ç½‘æ ¼ç¼–å·
+		//»ñÈ¡Íø¸ñ±àºÅ
 		int getMeshID();
-		//è®¾ç½®æŒ‡å®šå•å…ƒç±»å‹
+		//ÉèÖÃ bore ½ÚµãÊ¶±ğÈİ²î
+		void setBoreNodeTolerance(double tol);
+		//»ñÈ¡ bore ½ÚµãÊ¶±ğÈİ²î
+		double getBoreNodeTolerance();
+		//ÉèÖÃÖ¸¶¨µ¥ÔªÀàĞÍ
 		void setCells(QList<int> cells);
-		//è·å–æŒ‡å®šå•å…ƒç±»å‹
+		//»ñÈ¡Ö¸¶¨µ¥ÔªÀàĞÍ
 		QList<int> getCells();
 
 	private:
@@ -104,6 +108,7 @@ namespace Gmsh{
 		double _sizeFactor{ 0.0 };
 		double _minSize{ 0.0 };
 		double _maxSize{ 0.0 };
+		double _boreNodeTolerance{ -1.0 };
 		bool _geoclean{ false };
 		int _smoothIteration{ 0 };
 		bool _gridCoplanar{ false };
@@ -116,4 +121,5 @@ namespace Gmsh{
 }
 
 #endif
+
 

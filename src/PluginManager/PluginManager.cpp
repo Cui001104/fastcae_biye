@@ -1,11 +1,12 @@
-﻿#include "PluginManager.h"
+#include "PluginManager.h"
 #include "pluginBase.h"
 #include "PluginManageDialog.h"
 #include "Settings/BusAPI.h"
 #include "MainWindow/MainWindow.h"
 #include <QApplication>
-#include <QFileInfoList>
 #include <QDir>
+#include <QFileInfo>
+#include <QFileInfoList>
 #include <QDomDocument>
 #include <QDomNodeList>
 #include <QDomElement>
@@ -60,6 +61,23 @@ namespace Plugins {
 			plugins.clear();
 			Setting::BusAPI::instance()->setPlugins(plugins);
 			return;
+		}
+
+		// 若配置中未勾选任何插件，则默认加载 plugins 目录下所有符合命名规则的插件（避免导出网格等接口未注册）
+		if(plugins.isEmpty()) {
+			dir.setFilter(QDir::Files | QDir::NoSymLinks);
+			QString suffix = "dll", pre = "plugin";
+#ifdef Q_OS_LINUX
+			suffix = "so";
+			pre = "libplugin";
+#endif
+			for(const QFileInfo& fi : dir.entryInfoList()) {
+				QString name = fi.fileName();
+				if(name.toLower().startsWith(pre) && name.toLower().endsWith(suffix))
+					plugins.append(name);
+			}
+			if(!plugins.isEmpty())
+				Setting::BusAPI::instance()->setPlugins(plugins);
 		}
 
 		for(int i = 0; i < plugins.size(); ++i) {

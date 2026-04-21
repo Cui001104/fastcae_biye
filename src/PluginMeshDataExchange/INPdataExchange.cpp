@@ -1,8 +1,9 @@
-﻿#include "INPdataExchange.h"
+#include "INPdataExchange.h"
 #include "MainWindow/MainWindow.h"
 #include "MeshData/meshSingleton.h"
 #include "MeshData/meshKernal.h"
 #include "MeshData/meshSet.h"
+#include <vtkCell.h>
 #include "BCBase/BCUserDef.h"
 #include "ModelData/modelDataSingleton.h"
 #include "ModelData/modelDataBaseExtend.h"
@@ -28,6 +29,76 @@
 #else
 #define ENDL "\n"
 #endif
+
+namespace
+{
+	QString abaqusFaceLabel(vtkCell *c, int vtkFaceIdx)
+	{
+		if (c == nullptr)
+			return QStringLiteral("S1");
+		switch (c->GetCellType())
+		{
+		case VTK_HEXAHEDRON:
+		{
+			static const char *labels[] = {"S1", "S2", "S3", "S4", "S5", "S6"};
+			if (vtkFaceIdx >= 0 && vtkFaceIdx < 6)
+				return QString::fromLatin1(labels[vtkFaceIdx]);
+		}
+		break;
+		case VTK_TETRA:
+		{
+			static const char *labels[] = {"S1", "S2", "S3", "S4"};
+			if (vtkFaceIdx >= 0 && vtkFaceIdx < 4)
+				return QString::fromLatin1(labels[vtkFaceIdx]);
+		}
+		break;
+		default:
+			break;
+		}
+		return QStringLiteral("S1");
+	}
+
+	QString abaqusSurfName(const QString &s)
+	{
+		QString t = s;
+		t.replace(QLatin1Char(' '), QLatin1Char('_'));
+		return t;
+	}
+
+	void buildInpSolidElementMap(vtkDataSet *data, QVector<int> &cellToElem, int &nSolid)
+	{
+		nSolid = 0;
+		if (data == nullptr)
+			return;
+		const int n = data->GetNumberOfCells();
+		cellToElem.resize(n);
+		cellToElem.fill(-1);
+		int eid = 0;
+		for (int i = 0; i < n; ++i)
+		{
+			vtkCell *c = data->GetCell(i);
+			if (c == nullptr)
+				continue;
+			if (c->GetCellType() == VTK_TETRA)
+			{
+				eid++;
+				cellToElem[i] = eid;
+			}
+		}
+		for (int i = 0; i < n; ++i)
+		{
+			vtkCell *c = data->GetCell(i);
+			if (c == nullptr)
+				continue;
+			if (c->GetCellType() == VTK_HEXAHEDRON)
+			{
+				eid++;
+				cellToElem[i] = eid;
+			}
+		}
+		nSolid = eid;
+	}
+} // namespace
 
 namespace MeshData
 {
@@ -180,39 +251,69 @@ namespace MeshData
 
 	bool INPdataExchange::write()
 	{
+		int kId = -1;
+		vtkDataSet *data = nullptr;
+
+		if (_modelId == -1)
+		{
+			// 点击状态栏按钮导出：默认导出最后一个网格核（避免直接返回导致0字节文件）
+			const int kc = _meshData->getKernalCount();
+			if (kc <= 0)
+				return false;
+			auto k = _meshData->getKernalAt(kc - 1);
+			if (k == nullptr)
+				return false;
+			kId = k->getID();
+			data = k->getMeshData();
+		}
+		else
+		{
+			// 点击Case中菜单导出：仅导出当前Case绑定的一个kernal
+			if (_Case == nullptr || _Case->getMeshKernalList().size() != 1)
+				return false;
+			kId = _Case->getMeshKernalList().at(0);
+			auto k = _meshData->getKernalByID(kId);
+			if (k == nullptr)
+				return false;
+			data = k->getMeshData();
+		}
+
+		if (!data)
+			return false;
+
 		QFile file(_fileName);
 		if (!file.open(QIODevice::Truncate | QIODevice::WriteOnly))
 			return false;
 		_stream = new QTextStream(&file);
 
-		if (_modelId == -1)
-		{
-			//点击状态栏按钮导出, 融合所有kernal并导出为INP文件
-			file.close();
-			return false;
-		}
-		else
-		{
-			//点击Case中菜单导出, 仅导出与Model绑定的一个kernal为INP文件
-			if (_Case->getMeshKernalList().size() != 1)
-			{
-				file.close();
-				return false;
-			}
+		*_stream << "*Heading" << endl;
+		*_stream << "** FastCAE mesh export" << endl;
+		*_stream << "*Part, name=PART-1" << endl;
 
-			int kId = _Case->getMeshKernalList().at(0);
-			vtkDataSet *data = _meshData->getKernalByID(kId)->getMeshData();
-			if (!data)
-			{
-				file.close();
-				return false;
-			}
-			writePoint(data);
-			writeCell(data);
-			writeComponent(kId);
+		QVector<int> cellToElem;
+		int nSolid = 0;
+		buildInpSolidElementMap(data, cellToElem, nSolid);
+
+		writePoint(data);
+		writeCell(data, cellToElem);
+		writeAllSolidElset(nSolid);
+		writeMeshSetsForKernel(kId, cellToElem);
+		writeBoundSurfaces(data, kId, cellToElem);
+		if (_Case != nullptr && !_Case->getInpMaterialIds().isEmpty())
+			writeSolidSection();
+
+		*_stream << "*End Part" << endl;
+		*_stream << "*Assembly, name=ASSEMBLY-1" << endl;
+		*_stream << "*Instance, name=PART-1-1, part=PART-1" << endl;
+		*_stream << "*End Instance" << endl;
+		*_stream << "*End Assembly" << endl;
+
+		if (_Case != nullptr)
+		{
 			writeMaterial();
 			writeBoundary();
 		}
+
 		file.close();
 		return true;
 	}
@@ -912,43 +1013,83 @@ namespace MeshData
 		}
 	}
 
-	void INPdataExchange::writeCell(vtkDataSet *data)
+	void INPdataExchange::writeCell(vtkDataSet *data, const QVector<int> &cellToElem)
 	{
-		*_stream << "*Element, type=";
-		int nCell = data->GetNumberOfCells();
-		if (nCell < 0)
+		const int nCell = data->GetNumberOfCells();
+		if (nCell <= 0)
 			return;
-		if (data->GetCell(0)->GetCellType() == VTK_TETRA)
-			*_stream << "C3D4" << endl;
 
-		int cIndex = 0;
-		QString qCellIdPointIds;
-		while (cIndex < nCell)
+		QString tetraLines;
+		QString hexaLines;
+		bool hasTetra = false;
+		bool hasHexa = false;
+
+		for (int cIndex = 0; cIndex < nCell; ++cIndex)
 		{
 			if (!_threadRuning)
 				return;
-			qCellIdPointIds.append(QString::number(cIndex + 1) + ",");
-			auto ptIdIndexs = data->GetCell(cIndex)->GetPointIds();
-			qCellIdPointIds.append(QString::number(ptIdIndexs->GetId(0) + 1) + ",");
-			qCellIdPointIds.append(QString::number(ptIdIndexs->GetId(1) + 1) + ",");
-			qCellIdPointIds.append(QString::number(ptIdIndexs->GetId(2) + 1) + ",");
-			qCellIdPointIds.append(QString::number(ptIdIndexs->GetId(3) + 1) + ENDL);
 
-			if (qCellIdPointIds.size() > 1024)
+			auto cell = data->GetCell(cIndex);
+			if (cell == nullptr)
+				continue;
+
+			auto ptIdIndexs = cell->GetPointIds();
+			if (ptIdIndexs == nullptr)
+				continue;
+
+			const int eid = (cIndex < cellToElem.size()) ? cellToElem[cIndex] : -1;
+			if (eid <= 0)
+				continue;
+
+			const int cellType = cell->GetCellType();
+			if (cellType == VTK_TETRA && ptIdIndexs->GetNumberOfIds() >= 4)
 			{
-				*_stream << qCellIdPointIds;
-				qCellIdPointIds.clear();
+				hasTetra = true;
+				tetraLines.append(QString::number(eid) + ",");
+				tetraLines.append(QString::number(ptIdIndexs->GetId(0) + 1) + ",");
+				tetraLines.append(QString::number(ptIdIndexs->GetId(1) + 1) + ",");
+				tetraLines.append(QString::number(ptIdIndexs->GetId(2) + 1) + ",");
+				tetraLines.append(QString::number(ptIdIndexs->GetId(3) + 1) + ENDL);
 			}
-			cIndex++;
-			if (cIndex == nCell && qCellIdPointIds.size() > 0)
-				*_stream << qCellIdPointIds;
+			else if (cellType == VTK_HEXAHEDRON && ptIdIndexs->GetNumberOfIds() >= 8)
+			{
+				hasHexa = true;
+				hexaLines.append(QString::number(eid) + ",");
+				hexaLines.append(QString::number(ptIdIndexs->GetId(0) + 1) + ",");
+				hexaLines.append(QString::number(ptIdIndexs->GetId(1) + 1) + ",");
+				hexaLines.append(QString::number(ptIdIndexs->GetId(2) + 1) + ",");
+				hexaLines.append(QString::number(ptIdIndexs->GetId(3) + 1) + ",");
+				hexaLines.append(QString::number(ptIdIndexs->GetId(4) + 1) + ",");
+				hexaLines.append(QString::number(ptIdIndexs->GetId(5) + 1) + ",");
+				hexaLines.append(QString::number(ptIdIndexs->GetId(6) + 1) + ",");
+				hexaLines.append(QString::number(ptIdIndexs->GetId(7) + 1) + ENDL);
+			}
+		}
+
+		if (hasTetra)
+		{
+			*_stream << "*Element, type=C3D4, elset=ALL_SOLID" << endl;
+			*_stream << tetraLines;
+		}
+		if (hasHexa)
+		{
+			*_stream << "*Element, type=C3D8, elset=ALL_SOLID" << endl;
+			*_stream << hexaLines;
 		}
 	}
 
-	void INPdataExchange::writeComponent(int kId)
+	void INPdataExchange::writeAllSolidElset(int nElem)
 	{
-		QList<int> inpSetIds = _Case->getComponentIDList();
-		int nSet = inpSetIds.size();
+		if (nElem <= 0)
+			return;
+		*_stream << "*Elset, elset=ALL_SOLID, generate" << endl;
+		*_stream << QString("1, %1, 1").arg(nElem) << endl;
+	}
+
+	void INPdataExchange::writeMeshSetsForKernel(int kId, const QVector<int> &cellToElem)
+	{
+		QList<int> setIds = _meshData->getSetIDFromKernal(kId);
+		int nSet = setIds.size();
 		if (nSet == 0)
 			return;
 
@@ -960,14 +1101,30 @@ namespace MeshData
 		{
 			if (!_threadRuning)
 				return;
-			auto inpSet = _meshData->getMeshSetByID(inpSetIds.at(index));
+			auto inpSet = _meshData->getMeshSetByID(setIds.at(index));
 			index++;
+			if (inpSet == nullptr)
+				continue;
+			if (dynamic_cast<BoundMeshSet *>(inpSet) != nullptr)
+				continue;
+			if (inpSet->getSetType() != Node && inpSet->getSetType() != Element)
+				continue;
 			if (inpSet->getSetType() == Node)
 				qSet.append("*Nset,nset=");
 			else if (inpSet->getSetType() == Element)
 				qSet.append("*Elset,elset=");
 
 			members = inpSet->getKernalMembers(kId);
+			if (inpSet->getSetType() == Element)
+			{
+				QList<int> mapped;
+				for (int m : members)
+				{
+					if (m >= 0 && m < cellToElem.size() && cellToElem[m] > 0)
+						mapped.append(cellToElem[m] - 1);
+				}
+				members = mapped;
+			}
 			nMember = members.size();
 			if (nMember <= 0)
 				continue;
@@ -995,6 +1152,62 @@ namespace MeshData
 			if (index == nSet && qSet.size() > 0)
 				*_stream << qSet;
 		}
+	}
+
+	void INPdataExchange::writeBoundSurfaces(vtkDataSet *data, int kId, const QVector<int> &cellToElem)
+	{
+		QList<int> setIds = _meshData->getSetIDFromKernal(kId);
+		for (int sid : setIds)
+		{
+			auto ms = _meshData->getMeshSetByID(sid);
+			auto bm = dynamic_cast<BoundMeshSet *>(ms);
+			if (bm == nullptr)
+				continue;
+			const QMap<int, QVector<int>> cf = bm->getCellFaces();
+			if (cf.isEmpty())
+				continue;
+			const QString surfName = abaqusSurfName(ms->getName());
+			*_stream << "*Surface, type=ELEMENT, name=" << surfName << endl;
+			for (auto it = cf.constBegin(); it != cf.constEnd(); ++it)
+			{
+				const int cellIdx = it.key();
+				const int elid = (cellIdx >= 0 && cellIdx < cellToElem.size()) ? cellToElem[cellIdx] : -1;
+				if (elid <= 0)
+					continue;
+				vtkCell *c = data->GetCell(cellIdx);
+				if (c == nullptr)
+					continue;
+				for (int fi : it.value())
+					*_stream << QString("%1, %2").arg(elid).arg(abaqusFaceLabel(c, fi)) << endl;
+			}
+		}
+	}
+
+	void INPdataExchange::writeSolidSection()
+	{
+		if (_Case == nullptr)
+			return;
+		const QList<int> inpMaterIds = _Case->getInpMaterialIds();
+		if (inpMaterIds.isEmpty())
+			return;
+		auto materSteWard = Material::MaterialSingleton::getInstance();
+		auto inpMaterial = materSteWard->getMaterialByID(inpMaterIds.first());
+		if (inpMaterial == nullptr)
+			return;
+		*_stream << "*Solid Section, elset=ALL_SOLID, material=" << inpMaterial->getName() << ENDL << ENDL;
+	}
+
+	void INPdataExchange::writeComponent(int kId)
+	{
+		MeshKernal *k = _meshData->getKernalByID(kId);
+		if (k == nullptr)
+			return;
+		vtkDataSet *data = k->getMeshData();
+		QVector<int> cellToElem;
+		int nSolid = 0;
+		buildInpSolidElementMap(data, cellToElem, nSolid);
+		(void)nSolid;
+		writeMeshSetsForKernel(kId, cellToElem);
 	}
 
 	void INPdataExchange::writeMaterial()

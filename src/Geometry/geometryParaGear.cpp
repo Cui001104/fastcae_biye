@@ -1,14 +1,6 @@
-/**
- * @file geometryParaGear.cpp
- * @brief 渐开线齿轮参数类源文件
- * @author FastCAE研发小组(fastcae@diso.cn)
- * @version 2.5.0
- * @date 2024-12-27
- * @copyright Copyright (c) Since 2020 青岛数智船海科技有限公司  All rights reserved.
- */
 #include "geometryParaGear.h"
-#include <QDomElement>
 #include <QDomDocument>
+#include <QDomElement>
 
 namespace Geometry
 {
@@ -35,6 +27,16 @@ namespace Geometry
 	int GeometryParaGear::getNumberOfTeeth()
 	{
 		return _numberOfTeeth;
+	}
+
+	void GeometryParaGear::setNumberOfSecondTeeth(int n)
+	{
+		_numberOfSecondTeeth = n;
+	}
+
+	int GeometryParaGear::getNumberOfSecondTeeth()
+	{
+		return _numberOfSecondTeeth;
 	}
 
 	void GeometryParaGear::setModule(double m)
@@ -127,83 +129,78 @@ namespace Geometry
 		return _tipReliefLength;
 	}
 
-	QDomElement& GeometryParaGear::writeToProjectFile(QDomDocument* doc, QDomElement* parent)
+	QDomElement &GeometryParaGear::writeToProjectFile(QDomDocument *doc, QDomElement *parent)
 	{
 		QDomElement element = doc->createElement("Parameter");
 		element.setAttribute("Type", this->typeToString());
 
 		QDomElement nameEle = doc->createElement("Name");
-		QDomText nameText = doc->createTextNode(_name);
-		nameEle.appendChild(nameText);
+		nameEle.appendChild(doc->createTextNode(_name));
 		element.appendChild(nameEle);
 
 		QDomElement teethEle = doc->createElement("NumberOfTeeth");
-		QDomText teethText = doc->createTextNode(QString::number(_numberOfTeeth));
-		teethEle.appendChild(teethText);
+		teethEle.appendChild(doc->createTextNode(QString::number(_numberOfTeeth)));
 		element.appendChild(teethEle);
 
+		QDomElement secondTeethEle = doc->createElement("NumberOfSecondTeeth");
+		secondTeethEle.appendChild(doc->createTextNode(QString::number(_numberOfSecondTeeth)));
+		element.appendChild(secondTeethEle);
+
 		QDomElement moduleEle = doc->createElement("Module");
-		QDomText moduleText = doc->createTextNode(QString::number(_module));
-		moduleEle.appendChild(moduleText);
+		moduleEle.appendChild(doc->createTextNode(QString::number(_module)));
 		element.appendChild(moduleEle);
 
 		QDomElement angleEle = doc->createElement("PressureAngle");
-		QDomText angleText = doc->createTextNode(QString::number(_pressureAngle));
-		angleEle.appendChild(angleText);
+		angleEle.appendChild(doc->createTextNode(QString::number(_pressureAngle)));
 		element.appendChild(angleEle);
 
 		QDomElement addendumEle = doc->createElement("AddendumCoefficient");
-		QDomText addendumText = doc->createTextNode(QString::number(_addendumCoeff));
-		addendumEle.appendChild(addendumText);
+		addendumEle.appendChild(doc->createTextNode(QString::number(_addendumCoeff)));
 		element.appendChild(addendumEle);
 
 		QDomElement dedendumEle = doc->createElement("DedendumCoefficient");
-		QDomText dedendumText = doc->createTextNode(QString::number(_dedendumCoeff));
-		dedendumEle.appendChild(dedendumText);
+		dedendumEle.appendChild(doc->createTextNode(QString::number(_dedendumCoeff)));
 		element.appendChild(dedendumEle);
 
 		QDomElement filletEle = doc->createElement("FilletCoefficient");
-		QDomText filletText = doc->createTextNode(QString::number(_filletCoeff));
-		filletEle.appendChild(filletText);
+		filletEle.appendChild(doc->createTextNode(QString::number(_filletCoeff)));
 		element.appendChild(filletEle);
 
 		QDomElement thicknessEle = doc->createElement("Thickness");
-		QDomText thicknessText = doc->createTextNode(QString::number(_thickness));
-		thicknessEle.appendChild(thicknessText);
+		thicknessEle.appendChild(doc->createTextNode(QString::number(_thickness)));
 		element.appendChild(thicknessEle);
 
 		QDomElement externalEle = doc->createElement("ExternalGear");
-		QDomText externalText = doc->createTextNode(_externalGear ? "true" : "false");
-		externalEle.appendChild(externalText);
+		externalEle.appendChild(doc->createTextNode(_externalGear ? "true" : "false"));
 		element.appendChild(externalEle);
 
 		QDomElement tipReliefAmountEle = doc->createElement("TipReliefAmount");
-		QDomText tipReliefAmountText = doc->createTextNode(QString::number(_tipReliefAmount));
-		tipReliefAmountEle.appendChild(tipReliefAmountText);
+		tipReliefAmountEle.appendChild(doc->createTextNode(QString::number(_tipReliefAmount)));
 		element.appendChild(tipReliefAmountEle);
 
 		QDomElement tipReliefLengthEle = doc->createElement("TipReliefLength");
-		QDomText tipReliefLengthText = doc->createTextNode(QString::number(_tipReliefLength));
-		tipReliefLengthEle.appendChild(tipReliefLengthText);
+		tipReliefLengthEle.appendChild(doc->createTextNode(QString::number(_tipReliefLength)));
 		element.appendChild(tipReliefLengthEle);
 
 		parent->appendChild(element);
 		return element;
 	}
 
-	void GeometryParaGear::readDataFromProjectFile(QDomElement* e)
+	void GeometryParaGear::readDataFromProjectFile(QDomElement *e)
 	{
 		QDomNodeList nodeList = e->childNodes();
 		for (int i = 0; i < nodeList.size(); ++i)
 		{
 			QDomElement ele = nodeList.at(i).toElement();
-			QString name = ele.nodeName();
-			QString value = ele.text();
+			const QString name = ele.nodeName();
+			const QString value = ele.text();
 
 			if (name == "Name")
 				_name = value;
 			else if (name == "NumberOfTeeth")
 				_numberOfTeeth = value.toInt();
+			else if (name == "NumberOfSecondTeeth")
+				_numberOfSecondTeeth = value.toInt();
 			else if (name == "Module")
 				_module = value.toDouble();
 			else if (name == "PressureAngle")
@@ -225,4 +222,3 @@ namespace Geometry
 		}
 	}
 }
-

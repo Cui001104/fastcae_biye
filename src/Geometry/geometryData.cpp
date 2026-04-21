@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file geometryData.cpp
  * @brief 几何数据管理基类源文件
  * @author FastCAE研发小组(fastcae@diso.cn)
@@ -376,7 +376,7 @@ namespace Geometry
 		para->_dim = 3;
 		para->_elementOrder = 1;
 		para->_sizeFactor = 1.00;
-		para->_maxSize = 100.00;
+		para->_maxSize = 2.00;
 		para->_minSize = 0.00;
 		para->_isGridCoplanar = true;
 		para->_geoclean = true;

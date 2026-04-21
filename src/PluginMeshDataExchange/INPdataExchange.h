@@ -1,9 +1,10 @@
-﻿#ifndef _INPDATAEXCHANGE_H_
+#ifndef _INPDATAEXCHANGE_H_
 #define _INPDATAEXCHANGE_H_
 
 #include "meshDataExchangePlugin.h"
 #include "MeshThreadBase.h"
 #include <QHash>
+#include <QVector>
 
 class QTextStream;
 class vtkUnstructuredGrid;
@@ -26,6 +27,7 @@ namespace MeshData
 {
 	class MeshData;
 	class MeshKernal;
+	class BoundMeshSet;
 
 	class MESHDATAEXCHANGEPLUGINAPI INPdataExchange :public MeshThreadBase
 	{
@@ -53,7 +55,11 @@ namespace MeshData
 		void addINPBCs(const QStringList& bcSetIds, const QStringList& bcName, const QStringList& bcType, const QList<double>& displacement, const QList<double>& rotation);
 
 		void writePoint(vtkDataSet* data);
-		void writeCell(vtkDataSet* data);
+		void writeCell(vtkDataSet* data, const QVector<int> &cellToElem);
+		void writeAllSolidElset(int nElem);
+		void writeMeshSetsForKernel(int kId, const QVector<int> &cellToElem);
+		void writeBoundSurfaces(vtkDataSet* data, int kId, const QVector<int> &cellToElem);
+		void writeSolidSection();
 		void writeComponent(int kId);
 		void writeMaterial();
 		void writeBoundary();

@@ -1,4 +1,4 @@
-﻿#include "GenerateMesh.h"
+#include "GenerateMesh.h"
 #include "GmshModule/GmshThread.h"
 #include "GmshModule/GmshModule.h"
 #include "GmshModule/GmshThreadManager.h"
@@ -54,7 +54,7 @@ namespace IO
 		para->_dim = 3;
 		para->_elementOrder = 1;
 		para->_sizeFactor = 1.00;
-		para->_maxSize = 100.00;
+		para->_maxSize = 2.00;
 		para->_minSize = 0.00;
 		para->_isGridCoplanar = true;
 		para->_geoclean = true;

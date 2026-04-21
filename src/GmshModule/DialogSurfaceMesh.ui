@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <ui version="4.0">
  <class>SurfaceMeshDialog</class>
  <widget class="QDialog" name="SurfaceMeshDialog">
@@ -130,7 +130,7 @@
            <double>9999999999999.000000000000000</double>
           </property>
           <property name="value">
-           <double>100.000000000000000</double>
+           <double>2.000000000000000</double>
           </property>
          </widget>
         </item>

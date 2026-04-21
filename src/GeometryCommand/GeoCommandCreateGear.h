@@ -64,8 +64,12 @@ namespace Command {
 		/// 创建齿轮2D轮廓线
 		TopoDS_Wire	 createGearProfile();
 		TopoDS_Wire createSecondGearProfile();
-		/// 拉伸生成3D齿轮
-		TopoDS_Shape extrudeProfile(const TopoDS_Wire& profile);
+		/// 分度圆直径对应的中心圆柱孔闭合线（反向 orientation，用作面内孔）
+		TopoDS_Wire	 createCenterHoleWire(double holeRadius, const gp_Pnt& centerOnXYPlane) const;
+		/// 两齿轮轴线方向上的标准/变位中心距（与 createSecondGearProfile 平移一致）
+		double		 centerDistanceBetweenGears() const;
+		/// 拉伸生成3D齿轮（外轮廓 + 中心内孔闭环）
+		TopoDS_Shape extrudeProfile(const TopoDS_Wire& outerProfile, const TopoDS_Wire& innerHoleWire);
 
 	private:
 		QString				   _name{};

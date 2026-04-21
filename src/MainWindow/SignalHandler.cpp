@@ -1,4 +1,4 @@
-﻿#include "SignalHandler.h"
+#include "SignalHandler.h"
 
 #include "Common/Types.h"
 #include "ConfigOptions/ConfigOptions.h"
@@ -50,6 +50,7 @@
 #include "MainWindow.h"
 #include "Material/MaterialSingletion.h"
 #include "MeshData/meshKernal.h"
+#include "MeshData/meshSet.h"
 #include "MeshData/meshSingleton.h"
 #include "ModelData/modelDataBase.h"
 #include "ModelData/modelDataSingleton.h"
@@ -89,6 +90,63 @@
 #include <QMessageBox>
 #include <QProcess>
 #include <QTreeWidgetItem>
+#include <vtkDataSet.h>
+#include <cmath>
+
+namespace {
+	class AutoBCBuilder {
+	public:
+		static bool buildNodeSetsByZ(MeshData::MeshKernal* kernal)
+		{
+			if(kernal == nullptr)
+				return false;
+			vtkDataSet* dataset = kernal->getMeshData();
+			if(dataset == nullptr || dataset->GetNumberOfPoints() <= 0)
+				return false;
+
+			double bounds[6] = {0.0};
+			dataset->GetBounds(bounds);
+			const double zMin = bounds[4];
+			const double zMax = bounds[5];
+			const double zSpan = zMax - zMin;
+			if(std::fabs(zSpan) < 1e-12)
+				return false;
+
+			// 齿轮默认沿 Z 方向拉伸：按端面自动识别固定端与驱动端节点
+			const double tol = std::max(1e-6, zSpan * 1e-3);
+			auto* meshData = MeshData::MeshData::getInstance();
+			auto* fixedSet = new MeshData::MeshSet(QString("%1_FixedEnd").arg(kernal->getName()),
+												   MeshData::Node);
+			auto* driveSet = new MeshData::MeshSet(QString("%1_DriveEnd").arg(kernal->getName()),
+												   MeshData::Node);
+
+			const int kid = kernal->getID();
+			double p[3] = {0.0, 0.0, 0.0};
+			for(int i = 0; i < dataset->GetNumberOfPoints(); ++i) {
+				dataset->GetPoint(i, p);
+				if(std::fabs(p[2] - zMin) <= tol)
+					fixedSet->appendMember(kid, i);
+				if(std::fabs(p[2] - zMax) <= tol)
+					driveSet->appendMember(kid, i);
+			}
+
+			bool created = false;
+			if(fixedSet->getAllCount() > 0) {
+				meshData->appendMeshSet(fixedSet);
+				created = true;
+			} else {
+				delete fixedSet;
+			}
+			if(driveSet->getAllCount() > 0) {
+				meshData->appendMeshSet(driveSet);
+				created = true;
+			} else {
+				delete driveSet;
+			}
+			return created;
+		}
+	};
+} // namespace
 
 namespace GUI {
 	SignalHandler::SignalHandler(MainWindow* mainwindow)
@@ -527,12 +585,20 @@ namespace GUI {
 		k->setName(name);
 		k->setMeshData(dataset);
 		MeshData::MeshData::getInstance()->appendMeshKernal(k);
+		const bool autoSetCreated = AutoBCBuilder::buildNodeSetsByZ(k);
 		_mainWindow->getSubWindowManager()->updatePreMeshActor();
 		ModuleBase::Message m;
 		m.type	  = Common::Message::Normal;
 		m.message = tr("Mesh Generated \"%1\"").arg(name);
 		emit _mainWindow->printMessageToMessageWindow(m);
 		emit _mainWindow->updateMeshTreeSig();
+		if(autoSetCreated) {
+			ModuleBase::Message sm;
+			sm.type = Common::Message::Normal;
+			sm.message = tr("Auto BC sets created: FixedEnd / DriveEnd");
+			emit _mainWindow->printMessageToMessageWindow(sm);
+			emit _mainWindow->updateSetTreeSig();
+		}
 	}
 
 	void SignalHandler::updateActionsStates()

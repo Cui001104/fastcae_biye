@@ -1,4 +1,4 @@
-﻿set(SOVERSION ${PROJECT_VERSION} ${PROJECT_VERSION_MAJOR} ${PROJECT_VERSION_MINOR} ${PROJECT_VERSION_PATCH})
+set(SOVERSION ${PROJECT_VERSION} ${PROJECT_VERSION_MAJOR} ${PROJECT_VERSION_MINOR} ${PROJECT_VERSION_PATCH})
 
 #-----------------------------------------------------------------------------
 # 所有项目
@@ -71,6 +71,9 @@ foreach(_plugin ${_plugins})
 		FOLDER Plugins
 	)
 endforeach()
+
+# 主程序依赖插件目标：构建 FastCAE 时同时构建插件，确保 exe 同目录下 plugins/ 中有 DLL，可用插件列表不为空
+add_dependencies(FastCAE ${_plugins})
 
 #-----------------------------------------------------------------------------
 # 安装插件到plugins目录

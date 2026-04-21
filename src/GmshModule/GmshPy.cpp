@@ -1,4 +1,4 @@
-﻿#include "GmshPy.h"
+#include "GmshPy.h"
 #include "GmshModule.h"
 #include "Geometry/geometryData.h"
 #include "Geometry/geometrySet.h"
@@ -16,6 +16,8 @@
 #include "MeshData/meshSingleton.h"
 #include <vtkSmartPointer.h>
 #include <vtkDataSet.h>
+#include <vtkIdList.h>
+#include <vtkPoints.h>
 #include <vtkUnstructuredGrid.h>
 #include <QDebug>
 #include "MainWindow/MainWindow.h"
@@ -71,15 +73,13 @@ namespace Gmsh
 	}
 
 	void GmshPy::GenerateMesh3D(char *solids, char *type, int order, int method, double factor, double sizemin, double sizemax,
-								bool clean, bool isGridCoplanar, char *points, char *fields /*, char* physicals*/, bool selectall, bool selectvisible,
-								int meshID /*, char* cells*/)
+		bool clean, bool isGridCoplanar, char *points, char *fields /*, char* physicals*/, bool selectall, bool selectvisible,
+		double boreNodeTolerance, int meshID /*, char* cells*/)
 	{
 		const QString solidBodys(solids);
 		const QString eleType(type);
 		const QString pointSizes(points);
 		const QString fieldSize(fields);
-		// const QString celltypes(cells);
-		// const QString physical(physicals);
 
 		GMshPara *p = new GMshPara;
 		const QStringList bodySurface = solidBodys.split(";");
@@ -108,25 +108,22 @@ namespace Gmsh
 		p->_isGridCoplanar = isGridCoplanar;
 		p->_sizeAtPoints = pointSizes;
 		p->_sizeFields = fieldSize;
-		//	p->_physicals = physical;
 		p->_selectall = selectall;
 		p->_selectvisible = selectvisible;
+		p->_boreNodeTolerance = boreNodeTolerance;
 		p->_meshID = meshID;
-		// p->_cells = celltypes;
 
 		emit _gmshModule->generateSig(p);
 	}
 
 	void GmshPy::GenerateMesh2D(char *solids, char *type, int order, int method, int smooth, double factor, double sizemin, double sizemax,
-								bool clean, bool isGridCoplanar, char *points, char *fields /*, char* physicals*/, bool selectall, bool selectvisible, int meshID
-								/*,char* cells*/)
+		bool clean, bool isGridCoplanar, char *points, char *fields /*, char* physicals*/, bool selectall, bool selectvisible,
+		double boreNodeTolerance, int meshID /*,char* cells*/)
 	{
 		const QString surfaces(solids);
 		const QString eleType(type);
 		const QString pointSizes(points);
 		const QString fieldSize(fields);
-		// const QString celltypes(cells);
-		// const QString physical(physicals);
 		qDebug() << surfaces;
 
 		GMshPara *p = new GMshPara;
@@ -157,11 +154,10 @@ namespace Gmsh
 		p->_isGridCoplanar = isGridCoplanar;
 		p->_sizeAtPoints = pointSizes;
 		p->_sizeFields = fieldSize;
-		//	p->_physicals = physical;
 		p->_selectall = selectall;
 		p->_selectvisible = selectvisible;
+		p->_boreNodeTolerance = boreNodeTolerance;
 		p->_meshID = meshID;
-		// p->_cells = celltypes;
 
 		emit _gmshModule->generateSig(p);
 	}
@@ -171,14 +167,12 @@ namespace Gmsh
 		const QString solidBodys(solids);
 		const QString eleType(type);
 		const QString fluidfield(fluids);
-
 		GMshPara *p = new GMshPara;
 		const QStringList solidlist = solidBodys.split(";");
 		for (QString bodyset : solidlist)
 		{
 			if (bodyset.isEmpty())
 				continue;
-
 			QStringList faces = bodyset.split(":");
 			int setid = faces.at(0).toInt();
 			QStringList surfaceList = faces.at(1).split(",");
@@ -188,6 +182,7 @@ namespace Gmsh
 				p->_solidHash.insert(setid, index);
 			}
 		}
+
 		p->_elementType = eleType;
 		p->_elementOrder = order;
 		p->_method = method;
@@ -196,51 +191,41 @@ namespace Gmsh
 		p->_dim = 3;
 		p->_fluidMesh = true;
 		QStringList fluidlist = fluidfield.split(";");
-		// QList<double*> flist{};
 		for (QString fluid : fluidlist)
 		{
 			if (fluid.isEmpty())
 				continue;
 
 			QStringList coors = fluid.split(",");
-			/*double coor[3] = { 0 };*/
 			double *coor = new double[3];
 			for (int i = 0; i < coors.size(); i++)
 			{
 				coor[i] = coors.at(i).toDouble();
 			}
-			// qDebug() << "coor" << coor[0] << coor[1] << coor[2];
 			p->_fluidField.append(coor);
 		}
-
-		// qDebug() << p->_fluidField;
-
-		// 		for (double* v:p->_fluidField)
-		// 		{
-		// 			qDebug() << v[0] << v[1] << v[2];
-		// 		}
 		emit _gmshModule->generateSig(p);
 	}
-
 }
 
 void GenerateMesh3D(char *solids, char *type, int order, int method, double factor, double sizemin, double sizemax,
-					bool clean, bool isGridCoplanar, char *points, char *fields /*, char* physicals*/, bool selectall, bool selectvisible,
-					int meshID /*, char* cells*/)
+	bool clean, bool isGridCoplanar, char *points, char *fields /*, char* physicals*/, bool selectall, bool selectvisible,
+	double boreNodeTolerance, int meshID /*, char* cells*/)
 {
 	Gmsh::GmshPy::GenerateMesh3D(solids, type, order, method, factor, sizemin, sizemax, clean,
-								 isGridCoplanar, points, fields /*, physicals*/, selectall, selectvisible, meshID /*, cells*/);
+		isGridCoplanar, points, fields /*, physicals*/, selectall, selectvisible, boreNodeTolerance, meshID /*, cells*/);
 }
 
 void GenerateMesh2D(char *solids, char *type, int order, int method, int smooth, double factor, double sizemin, double sizemax,
-					bool clean, bool isGridCoplanar, char *points, char *fields /*, char* physicals*/, bool selectall, bool selectvisible,
-					int meshID /*, char* cells*/)
+	bool clean, bool isGridCoplanar, char *points, char *fields /*, char* physicals*/, bool selectall, bool selectvisible,
+	double boreNodeTolerance, int meshID /*, char* cells*/)
 {
 	Gmsh::GmshPy::GenerateMesh2D(solids, type, order, method, smooth, factor, sizemin, sizemax, clean,
-								 isGridCoplanar, points, fields /*, physicals*/, selectall, selectvisible, meshID /*, cells*/);
+		isGridCoplanar, points, fields /*, physicals*/, selectall, selectvisible, boreNodeTolerance, meshID /*, cells*/);
 }
 
 void generateFluidMesh(char *solids, char *type, char *fluids, int order, int method, double size)
 {
 	Gmsh::GmshPy::generateFluidMesh(solids, type, fluids, order, method, size);
 }
+

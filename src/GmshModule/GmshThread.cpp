@@ -1,8 +1,9 @@
-﻿#include "GmshThread.h"
+#include "GmshThread.h"
 #include "PythonModule/PyAgent.h"
 #include "GmshPy.h"
 #include "Geometry/geometryData.h"
 #include "Geometry/geometrySet.h"
+#include "Geometry/geometryParaGear.h"
 #include <QApplication>
 #include <TopExp_Explorer.hxx>
 #include <TopoDS_Compound.hxx>
@@ -14,12 +15,17 @@
 #include <QTextCodec>
 #include <vtkDataSetReader.h>
 #include <vtkCell.h>
+#include <vtkCell3D.h>
 #include "MeshData/meshKernal.h"
+#include "MeshData/meshSet.h"
 #include "MeshData/meshSingleton.h"
 #include <vtkSmartPointer.h>
 #include <vtkDataSet.h>
 #include <vtkUnstructuredGrid.h>
 #include <QDebug>
+#include <algorithm>
+#include <cmath>
+#include <limits>
 #include "MainWindow/MainWindow.h"
 #include "MainWindow/SubWindowManager.h"
 #include "MainWidgets/preWindow.h"
@@ -45,12 +51,279 @@
 #include <vtkUnstructuredGrid.h>
 #include <vtkPoints.h>
 #include <vtkIdList.h>
+#include <QHash>
+#include <QQueue>
+#include <QSet>
 #include "GeometryCommand/GeoCommandCommon.h"
 #include "FluidMeshPreProcess.h"
 #include "GmshScriptWriter.h"
 
 namespace Gmsh
 {
+namespace
+{
+	struct GearBoreSpec
+	{
+		QString name{};
+		double holeRadius{0.0};
+	};
+
+	QVector<GearBoreSpec> collectGearBoreSpecs()
+	{
+		QVector<GearBoreSpec> specs;
+		auto *geoData = Geometry::GeometryData::getInstance();
+		if (geoData == nullptr)
+			return specs;
+
+		for (int i = 0; i < geoData->getGeometrySetCount(); ++i)
+		{
+			auto *set = geoData->getGeometrySetAt(i);
+			if (set == nullptr)
+				continue;
+
+			auto *gearPara = dynamic_cast<Geometry::GeometryParaGear *>(set->getParameter());
+			if (gearPara == nullptr)
+				continue;
+
+			const double module = gearPara->getModule();
+			const double holeRadius1 = 0.2 * module * static_cast<double>(gearPara->getNumberOfTeeth());
+			if (holeRadius1 > 0.0)
+			{
+				GearBoreSpec spec;
+				spec.name = QStringLiteral("gear1_bore_nodes");
+				spec.holeRadius = holeRadius1;
+				specs.append(spec);
+			}
+
+			const double holeRadius2 = 0.2 * module * static_cast<double>(gearPara->getNumberOfSecondTeeth());
+			if (holeRadius2 > 0.0)
+			{
+				GearBoreSpec spec;
+				spec.name = QStringLiteral("gear2_bore_nodes");
+				spec.holeRadius = holeRadius2;
+				specs.append(spec);
+			}
+			break;
+		}
+		return specs;
+	}
+
+	int detectAxialAxis(vtkDataSet *dataset)
+	{
+		if (dataset == nullptr)
+			return 2;
+		double bounds[6] = {0.0};
+		dataset->GetBounds(bounds);
+		int axis = 0;
+		double minSpan = bounds[1] - bounds[0];
+		for (int a = 1; a < 3; ++a)
+		{
+			const double span = bounds[2 * a + 1] - bounds[2 * a];
+			if (span < minSpan)
+			{
+				minSpan = span;
+				axis = a;
+			}
+		}
+		return axis;
+	}
+
+	int detectSeparationAxis(vtkDataSet *dataset, int axialAxis)
+	{
+		double bounds[6] = {0.0};
+		dataset->GetBounds(bounds);
+		QVector<int> transverseAxes;
+		for (int a = 0; a < 3; ++a)
+		{
+			if (a != axialAxis)
+				transverseAxes.append(a);
+		}
+		if (transverseAxes.size() != 2)
+			return (axialAxis + 1) % 3;
+
+		const double span0 = bounds[2 * transverseAxes[0] + 1] - bounds[2 * transverseAxes[0]];
+		const double span1 = bounds[2 * transverseAxes[1] + 1] - bounds[2 * transverseAxes[1]];
+		return span0 >= span1 ? transverseAxes[0] : transverseAxes[1];
+	}
+
+	void computeGroupCenter(vtkDataSet *dataset, const QVector<int> &pointIds, double center[3])
+	{
+		center[0] = center[1] = center[2] = 0.0;
+		if (dataset == nullptr || pointIds.isEmpty())
+			return;
+
+		double minCoord[3] = {
+			(std::numeric_limits<double>::max)(),
+			(std::numeric_limits<double>::max)(),
+			(std::numeric_limits<double>::max)()};
+		double maxCoord[3] = {
+			-(std::numeric_limits<double>::max)(),
+			-(std::numeric_limits<double>::max)(),
+			-(std::numeric_limits<double>::max)()};
+
+		double point[3] = {0.0, 0.0, 0.0};
+		for (int pid : pointIds)
+		{
+			dataset->GetPoint(pid, point);
+			for (int a = 0; a < 3; ++a)
+			{
+				minCoord[a] = qMin(minCoord[a], point[a]);
+				maxCoord[a] = qMax(maxCoord[a], point[a]);
+			}
+		}
+
+		for (int a = 0; a < 3; ++a)
+			center[a] = 0.5 * (minCoord[a] + maxCoord[a]);
+	}
+
+	double radialDistanceToAxis(const double point[3], const double center[3], int axis)
+	{
+		const int a0 = (axis + 1) % 3;
+		const int a1 = (axis + 2) % 3;
+		const double d0 = point[a0] - center[a0];
+		const double d1 = point[a1] - center[a1];
+		return std::sqrt(d0 * d0 + d1 * d1);
+	}
+
+	QVector<QVector<int>> collectBodyPointGroups(vtkDataSet *dataset)
+	{
+		QVector<QVector<int>> groups;
+		if (dataset == nullptr)
+			return groups;
+
+		const int nCells = dataset->GetNumberOfCells();
+		const int nPoints = dataset->GetNumberOfPoints();
+		if (nCells <= 0 || nPoints <= 0)
+			return groups;
+
+		QHash<int, QVector<int>> pointToCells;
+		QVector<QVector<int>> cellPoints(nCells);
+		for (int ci = 0; ci < nCells; ++ci)
+		{
+			vtkCell *cell = dataset->GetCell(ci);
+			if (cell == nullptr)
+				continue;
+			vtkIdList *pids = cell->GetPointIds();
+			if (pids == nullptr)
+				continue;
+			QVector<int> &pts = cellPoints[ci];
+			pts.reserve(static_cast<int>(pids->GetNumberOfIds()));
+			for (vtkIdType j = 0; j < pids->GetNumberOfIds(); ++j)
+			{
+				const int pid = static_cast<int>(pids->GetId(j));
+				if (pid < 0 || pid >= nPoints)
+					continue;
+				pts.append(pid);
+				pointToCells[pid].append(ci);
+			}
+		}
+
+		QVector<char> visited(nCells, 0);
+		for (int start = 0; start < nCells; ++start)
+		{
+			if (visited[start] || cellPoints[start].isEmpty())
+				continue;
+
+			QQueue<int> queue;
+			QSet<int> bodyPointSet;
+			queue.enqueue(start);
+			visited[start] = 1;
+
+			while (!queue.isEmpty())
+			{
+				const int current = queue.dequeue();
+				const QVector<int> &pts = cellPoints[current];
+				for (int pid : pts)
+				{
+					bodyPointSet.insert(pid);
+					const QVector<int> neighbors = pointToCells.value(pid);
+					for (int next : neighbors)
+					{
+						if (next < 0 || next >= nCells || visited[next] || cellPoints[next].isEmpty())
+							continue;
+						visited[next] = 1;
+						queue.enqueue(next);
+					}
+				}
+			}
+
+			if (!bodyPointSet.isEmpty())
+				groups.append(bodyPointSet.values().toVector());
+		}
+
+		return groups;
+	}
+
+	QList<int> selectBoreNodeIds1Based(vtkDataSet *dataset, const QVector<int> &pointIds, const double center[3], int axialAxis,
+		double holeRadius, double tolerance)
+	{
+		QList<int> nodeIds;
+		if (dataset == nullptr || pointIds.isEmpty() || holeRadius <= 0.0 || tolerance <= 0.0)
+			return nodeIds;
+
+		double point[3] = {0.0, 0.0, 0.0};
+		for (int pid : pointIds)
+		{
+			dataset->GetPoint(pid, point);
+			const double radius = radialDistanceToAxis(point, center, axialAxis);
+			if (std::fabs(radius - holeRadius) <= tolerance)
+				nodeIds.append(pid + 1);
+		}
+
+		std::sort(nodeIds.begin(), nodeIds.end());
+		nodeIds.erase(std::unique(nodeIds.begin(), nodeIds.end()), nodeIds.end());
+		return nodeIds;
+	}
+
+	QStringList createGearBoreNodeSets(MeshData::MeshData *meshData, MeshData::MeshKernal *kernal, vtkDataSet *dataset,
+		double configuredTolerance, double fallbackSize)
+	{
+		QStringList createdNames;
+		if (meshData == nullptr || kernal == nullptr || dataset == nullptr)
+			return createdNames;
+
+		const QVector<GearBoreSpec> specs = collectGearBoreSpecs();
+		if (specs.isEmpty())
+			return createdNames;
+
+		const int axialAxis = detectAxialAxis(dataset);
+		QVector<QVector<int>> bodyPointGroups = collectBodyPointGroups(dataset);
+		if (bodyPointGroups.isEmpty())
+			return createdNames;
+
+		// ??????????????? gear1 / gear2 ??
+		const int separationAxis = detectSeparationAxis(dataset, axialAxis);
+		std::sort(bodyPointGroups.begin(), bodyPointGroups.end(), [&](const QVector<int> &a, const QVector<int> &b) {
+			double centerA[3] = {0.0, 0.0, 0.0};
+			double centerB[3] = {0.0, 0.0, 0.0};
+			computeGroupCenter(dataset, a, centerA);
+			computeGroupCenter(dataset, b, centerB);
+			return centerA[separationAxis] < centerB[separationAxis];
+		});
+
+		const int bodyCount = qMin(specs.size(), bodyPointGroups.size());
+		for (int i = 0; i < bodyCount; ++i)
+		{
+			double center[3] = {0.0, 0.0, 0.0};
+			computeGroupCenter(dataset, bodyPointGroups[i], center);
+			const double tolerance = configuredTolerance > 0.0
+				? configuredTolerance
+				: qMax(1.0e-6, fallbackSize > 0.0 ? 0.5 * fallbackSize : 0.01 * specs[i].holeRadius);
+			const QList<int> nodeIds1Based = selectBoreNodeIds1Based(dataset, bodyPointGroups[i], center, axialAxis,
+				specs[i].holeRadius, tolerance);
+			if (nodeIds1Based.isEmpty())
+				continue;
+
+			auto *set = new MeshData::MeshSet(specs[i].name, MeshData::Node);
+			const int kernelId = kernal->getID();
+			for (int nodeId1Based : nodeIds1Based)
+				set->appendMember(kernelId, nodeId1Based - 1);
+			meshData->appendMeshSet(set);
+			createdNames.append(specs[i].name);
+		}
+		return createdNames;
+	}
+}
 	GmshThread::GmshThread(GUI::MainWindow *mw, MainWidget::PreWindow *pre, GmshModule *m, int dim)
 		: _mainwindow(mw), _preWindow(pre), _gmshModule(m), _dim(dim)
 	{
@@ -63,7 +336,7 @@ namespace Gmsh
 		_compounnd = new TopoDS_Compound;
 		_fluidMeshProcess = new FluidMeshPreProcess();
 		_scriptWriter = new GmshScriptWriter;
-		//临时文件夹路径
+		//??????�?
 		// 		QString exelPath = QCoreApplication::applicationDirPath();
 		// 		const QString tempDir = exelPath + "/../temp/";
 		// 		DataProperty::ParameterString* s = new DataProperty::ParameterString();
@@ -71,7 +344,7 @@ namespace Gmsh
 		// 		s->setValue(tempDir);
 		// 		this->appendParameter(s);
 
-		if (dim == 3) //三维补充光顺参数
+		if (dim == 3) //????????
 		{
 			_smoothIteration = 20;
 			// 			DataProperty::ParameterInt* sm = new DataProperty::ParameterInt();
@@ -257,6 +530,166 @@ namespace Gmsh
 			k->setMeshData(dataset);
 
 			data->appendMeshKernal(k);
+			const QStringList boreSetNames = createGearBoreNodeSets(data, k, dataset, _boreNodeTolerance, _minSize);
+			if (!boreSetNames.isEmpty())
+				emit sendMessage(QString("Auto bore node sets created: %1").arg(boreSetNames.join(" / ")));
+			// ???????????????FixedEnd / DriveEnd?? Z ?�????????
+			double bounds[6] = {0.0};
+			dataset->GetBounds(bounds);
+			const double zMin = bounds[4];
+			const double zMax = bounds[5];
+			const double zSpan = zMax - zMin;
+			if (std::fabs(zSpan) > 1e-12)
+			{
+				const double tol = std::max(1e-6, zSpan * 1e-3);
+				auto* fixedSet = new MeshData::MeshSet(QString("%1_FixedEnd").arg(k->getName()), MeshData::Node);
+				auto* driveSet = new MeshData::MeshSet(QString("%1_DriveEnd").arg(k->getName()), MeshData::Node);
+				double p[3] = {0.0, 0.0, 0.0};
+				const int kid = k->getID();
+				const int np = dataset->GetNumberOfPoints();
+				for (int i = 0; i < np; ++i)
+				{
+					dataset->GetPoint(i, p);
+					if (std::fabs(p[2] - zMin) <= tol) fixedSet->appendMember(kid, i);
+					if (std::fabs(p[2] - zMax) <= tol) driveSet->appendMember(kid, i);
+				}
+				bool hasAutoSet = false;
+				if (fixedSet->getAllCount() > 0) { data->appendMeshSet(fixedSet); hasAutoSet = true; }
+				else delete fixedSet;
+				if (driveSet->getAllCount() > 0) { data->appendMeshSet(driveSet); hasAutoSet = true; }
+				else delete driveSet;
+				if (hasAutoSet)
+					emit sendMessage("Auto BC sets created: FixedEnd / DriveEnd");
+			}
+
+			// ??????????????????????�?Y ??????????????????????
+			{
+				const int np = dataset->GetNumberOfPoints();
+				if (np > 0)
+				{
+					double bb[6] = {0.0};
+					dataset->GetBounds(bb);
+					const double yMidSplit = 0.5 * (bb[2] + bb[3]);
+
+					double p[3] = {0.0, 0.0, 0.0};
+					double c1x = 0.0, c1y = 0.0, c2x = 0.0, c2y = 0.0;
+					int n1 = 0, n2 = 0;
+					for (int i = 0; i < np; ++i)
+					{
+						dataset->GetPoint(i, p);
+						if (p[1] <= yMidSplit) { c1x += p[0]; c1y += p[1]; ++n1; }
+						else { c2x += p[0]; c2y += p[1]; ++n2; }
+					}
+					if (n1 > 0 && n2 > 0)
+					{
+						c1x /= n1; c1y /= n1;
+						c2x /= n2; c2y /= n2;
+
+						double r1Max = 0.0, r2Max = 0.0;
+						for (int i = 0; i < np; ++i)
+						{
+							dataset->GetPoint(i, p);
+							if (p[1] <= yMidSplit)
+							{
+								const double r = std::sqrt((p[0] - c1x) * (p[0] - c1x) + (p[1] - c1y) * (p[1] - c1y));
+								if (r > r1Max) r1Max = r;
+							}
+							else
+							{
+								const double r = std::sqrt((p[0] - c2x) * (p[0] - c2x) + (p[1] - c2y) * (p[1] - c2y));
+								if (r > r2Max) r2Max = r;
+							}
+						}
+
+						const double outerBand = 0.90; // ????????/???/???????
+						auto* gear1Face = new MeshData::BoundMeshSet();
+						auto* gear2Face = new MeshData::BoundMeshSet();
+						gear1Face->setType(MeshData::Element);
+						gear2Face->setType(MeshData::Element);
+						gear1Face->setName(QStringLiteral("set_gear1_surf"));
+						gear2Face->setName(QStringLiteral("set_gear2_surf"));
+						const int kid = k->getID();
+						const int nc = dataset->GetNumberOfCells();
+						QMap<QString, int> faceCount;
+						QMap<QString, QPair<int, int>> firstFace; // key -> (cellIdx, localFaceIdx)
+						for (int ci = 0; ci < nc; ++ci)
+						{
+							vtkCell* cell = dataset->GetCell(ci);
+							auto* c3d = vtkCell3D::SafeDownCast(cell);
+							if (c3d == nullptr) continue;
+							const int faceNum = c3d->GetNumberOfFaces();
+							for (int fi = 0; fi < faceNum; ++fi)
+							{
+								vtkCell* fcell = c3d->GetFace(fi);
+								if (fcell == nullptr) continue;
+								vtkIdList* pids = fcell->GetPointIds();
+								if (pids == nullptr || pids->GetNumberOfIds() < 3) continue;
+								QVector<int> face;
+								for (vtkIdType j = 0; j < pids->GetNumberOfIds() && j < 4; ++j)
+									face.append(static_cast<int>(pids->GetId(j)));
+								if (face.size() == 3) face.append(face.last());
+								if (face.size() != 4) continue;
+								QVector<int> sortedFace = face;
+								std::sort(sortedFace.begin(), sortedFace.end());
+								const QString key = QStringLiteral("%1_%2_%3_%4")
+									.arg(sortedFace[0]).arg(sortedFace[1]).arg(sortedFace[2]).arg(sortedFace[3]);
+								faceCount[key] += 1;
+								if (!firstFace.contains(key))
+									firstFace.insert(key, qMakePair(ci, fi));
+							}
+						}
+
+						QMap<int, QVector<int>> gear1CellFaces;
+						QMap<int, QVector<int>> gear2CellFaces;
+						for (auto it = faceCount.constBegin(); it != faceCount.constEnd(); ++it)
+						{
+							if (it.value() != 1 || !firstFace.contains(it.key())) continue; // ????
+							const QPair<int, int> cf = firstFace.value(it.key());
+							const int ci = cf.first;
+							const int fi = cf.second;
+							vtkCell* cell = dataset->GetCell(ci);
+							auto* c3d = vtkCell3D::SafeDownCast(cell);
+							if (c3d == nullptr) continue;
+							vtkCell* fcell = c3d->GetFace(fi);
+							if (fcell == nullptr || fcell->GetNumberOfPoints() <= 0) continue;
+							double fx = 0.0, fy = 0.0;
+							for (vtkIdType j = 0; j < fcell->GetNumberOfPoints(); ++j)
+							{
+								dataset->GetPoint(fcell->GetPointId(j), p);
+								fx += p[0];
+								fy += p[1];
+							}
+							fx /= fcell->GetNumberOfPoints();
+							fy /= fcell->GetNumberOfPoints();
+							if (fy <= yMidSplit)
+							{
+								const double r = std::sqrt((fx - c1x) * (fx - c1x) + (fy - c1y) * (fy - c1y));
+								if (r >= outerBand * r1Max) gear1CellFaces[ci].append(fi);
+							}
+							else
+							{
+								const double r = std::sqrt((fx - c2x) * (fx - c2x) + (fy - c2y) * (fy - c2y));
+								if (r >= outerBand * r2Max) gear2CellFaces[ci].append(fi);
+							}
+						}
+
+						for (auto it = gear1CellFaces.constBegin(); it != gear1CellFaces.constEnd(); ++it)
+							gear1Face->appendMember(kid, it.key());
+						for (auto it = gear2CellFaces.constBegin(); it != gear2CellFaces.constEnd(); ++it)
+							gear2Face->appendMember(kid, it.key());
+						gear1Face->setCellFaces(gear1CellFaces);
+						gear2Face->setCellFaces(gear2CellFaces);
+
+						bool hasContactSet = false;
+						if (!gear1CellFaces.isEmpty()) { data->appendMeshSet(gear1Face); hasContactSet = true; }
+						else delete gear1Face;
+						if (!gear2CellFaces.isEmpty()) { data->appendMeshSet(gear2Face); hasContactSet = true; }
+						else delete gear2Face;
+						if (hasContactSet)
+							emit sendMessage("Auto surface sets created: set_gear1_surf / set_gear2_surf (boundary faces)");
+					}
+				}
+			}
 
 			if (!_fluidMesh)
 				setGmshSettingData(k);
@@ -396,6 +829,7 @@ namespace Gmsh
 		// this->setPhysicals(para->_physicals);
 		this->setSelectedAll(para->_selectall);
 		this->setSelectedVisible(para->_selectvisible);
+		this->setBoreNodeTolerance(para->_boreNodeTolerance);
 		this->setMeshID(para->_meshID);
 		this->setFluidMesh(para->_fluidMesh);
 		// this->setCellTypeList(para->_cells);
@@ -507,6 +941,11 @@ namespace Gmsh
 	void GmshThread::setSizeFields(QString fs)
 	{
 		_sizeFields = fs;
+	}
+
+	void GmshThread::setBoreNodeTolerance(double tol)
+	{
+		_boreNodeTolerance = tol;
 	}
 
 	void GmshThread::setMeshID(int id)
@@ -804,6 +1243,7 @@ namespace Gmsh
 		setting->setMethod(_method);
 		setting->setSizeAtPoints(_sizeAtPoints);
 		setting->setSizeFields(_sizeFields);
+		setting->setBoreNodeTolerance(_boreNodeTolerance);
 		setting->setMeshID(_meshID);
 		setting->setCells(_cellTypeList);
 
@@ -912,3 +1352,11 @@ namespace Gmsh
 	}
 
 }
+
+
+
+
+
+
+
+

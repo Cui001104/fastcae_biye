@@ -1,4 +1,4 @@
-#include "GeoCommandCreateGear.h"
+﻿#include "GeoCommandCreateGear.h"
 #include "Geometry/geometryData.h"
 #include "Geometry/geometrySet.h"
 #include "Geometry/geometryParaGear.h"
@@ -121,13 +121,13 @@ namespace Command {
 		_x2 = coefficient2;
 	}
 
-	// 渐开线极坐标角度计算
+	// 娓愬紑绾挎瀬鍧愭爣瑙掑害璁＄畻
 	static double involuteAngle(double Rb, double R)
 	{
 		return std::sqrt(R * R - Rb * Rb) / Rb - std::acos(Rb / R);
 	}
 
-	// 渐开线点计算 (基于参数theta)
+	// 娓愬紑绾跨偣璁＄畻 (鍩轰簬鍙傛暟theta)
 	static gp_Pnt involutePoint(double Rb, double theta)
 	{
 		double x = Rb * (std::cos(theta) + theta * std::sin(theta));
@@ -135,7 +135,7 @@ namespace Command {
 		return gp_Pnt(x, y, 0);
 	}
 
-	// 旋转点
+	// 鏃嬭浆鐐?
 	static gp_Pnt rotatePoint(const gp_Pnt& pt, double angle)
 	{
 		double cosA = std::cos(angle);
@@ -145,7 +145,7 @@ namespace Command {
 		return gp_Pnt(x, y, pt.Z());
 	}
 
-	// 镜像点 (关于X轴)
+	// 闀滃儚鐐?(鍏充簬X杞?
 	static gp_Pnt mirrorPoint(const gp_Pnt& pt)
 	{
 		return gp_Pnt(pt.X(), -pt.Y(), pt.Z());
@@ -153,41 +153,41 @@ namespace Command {
 
 	TopoDS_Wire GeoCommandCreateGear::createGearProfile()
 	{
-		// 齿轮基本参数计算
+		// 榻胯疆鍩烘湰鍙傛暟璁＄畻
     double m  = _module;
     int    Z  = _numberOfTeeth;
-    double Z2 = _numberOfSecondTeeth;  // 第二个齿轮的齿数
-    double phi = _pressureAngle * M_PI / 180.0; // 转换为弧度
+    double Z2 = _numberOfSecondTeeth;  // 绗簩涓娇杞殑榻挎暟
+    double phi = _pressureAngle * M_PI / 180.0; // 杞崲涓哄姬搴?
     
-    // 变位系数
-    double x1 = _x1;  // 第一个齿轮的变位系数
-    double x2 = _x2;  // 第二个齿轮的变位系数（用于计算中心距等）
+    // 鍙樹綅绯绘暟
+    double x1 = _x1;  // 绗竴涓娇杞殑鍙樹綅绯绘暟
+    double x2 = _x2;  // 绗簩涓娇杞殑鍙樹綅绯绘暟锛堢敤浜庤绠椾腑蹇冭窛绛夛級
     double centerDistance;
-    double y_delt = 0.0;  // 齿顶高变动系数
-    double alphaPrime = phi;  // 啮合角，默认为压力角
+    double y_delt = 0.0;  // 榻块《楂樺彉鍔ㄧ郴鏁?
+    double alphaPrime = phi;  // 鍟悎瑙掞紝榛樿涓哄帇鍔涜
 
-    // 计算中心距和变位相关参数
+    // 璁＄畻涓績璺濆拰鍙樹綅鐩稿叧鍙傛暟
     if (x1 + x2 == 0)
     {
-        qDebug() << "第一个齿轮：不用变位，直接计算中心距";
+        qDebug() << "绗竴涓娇杞細涓嶇敤鍙樹綅锛岀洿鎺ヨ绠椾腑蹇冭窛";
         centerDistance = (Z + Z2) * m / 2;
     }
     else
     {
-        qDebug() << "第一个齿轮：使用变位计算中心距及相关参数";
+        qDebug() << "绗竴涓娇杞細浣跨敤鍙樹綅璁＄畻涓績璺濆強鐩稿叧鍙傛暟";
         
-        // 1. 计算未变位时的中心距
+        // 1. 璁＄畻鏈彉浣嶆椂鐨勪腑蹇冭窛
         double a = (Z + Z2) * m / 2;
         
-        // 2. 计算总变位系数
+        // 2. 璁＄畻鎬诲彉浣嶇郴鏁?
         double x_sig = x1 + x2;
         
-        // 3. 计算啮合角 α'
-        double invAlpha = std::tan(phi) - phi; // 渐开线函数 invα
+        // 3. 璁＄畻鍟悎瑙?伪'
+        double invAlpha = std::tan(phi) - phi; // 娓愬紑绾垮嚱鏁?inv伪
         double invAlphaPrime = invAlpha + 2 * x_sig * std::tan(phi) / (Z + Z2);
         
-        // 求解啮合角 α'（牛顿迭代法）
-        alphaPrime = phi; // 初始值设为压力角
+        // 姹傝В鍟悎瑙?伪'锛堢墰椤胯凯浠ｆ硶锛?
+        alphaPrime = phi; // 鍒濆鍊艰涓哄帇鍔涜
         double tolerance = 1e-10;
         int maxIterations = 100;
         
@@ -203,53 +203,53 @@ namespace Command {
                 break;
         }
         
-        // 4. 计算实际中心距 a'
+        // 4. 璁＄畻瀹為檯涓績璺?a'
         centerDistance = a * std::cos(phi) / std::cos(alphaPrime);
         
-        // 5. 计算中心距变动系数 y
+        // 5. 璁＄畻涓績璺濆彉鍔ㄧ郴鏁?y
         double y = (centerDistance - a) / m;
         
-        // 6. 计算齿顶高变动系数 y_delt
+        // 6. 璁＄畻榻块《楂樺彉鍔ㄧ郴鏁?y_delt
         y_delt = x_sig - y;
         
-        qDebug() << "第一个齿轮变位参数: x_sig =" << x_sig 
+        qDebug() << "绗竴涓娇杞彉浣嶅弬鏁? x_sig =" << x_sig 
                  << ", y =" << y 
                  << ", y_delt =" << y_delt;
-        qDebug() << "啮合角 α' =" << (alphaPrime * 180.0 / M_PI) << "度";
-        qDebug() << "实际中心距 a' =" << centerDistance;
+        qDebug() << "alphaPrime =" << (alphaPrime * 180.0 / M_PI) << " deg";
+        qDebug() << "瀹為檯涓績璺?a' =" << centerDistance;
     }
 
-    // 各圆半径计算（区分变位和非变位情况）
-    double Rref = Z * m / 2.0; // 分度圆半径
+    // 鍚勫渾鍗婂緞璁＄畻锛堝尯鍒嗗彉浣嶅拰闈炲彉浣嶆儏鍐碉級
+    double Rref = Z * m / 2.0; // 鍒嗗害鍦嗗崐寰?
     
-    // 对于变位齿轮，齿顶高需要减去齿顶高变动系数
+    // 瀵逛簬鍙樹綅榻胯疆锛岄娇椤堕珮闇€瑕佸噺鍘婚娇椤堕珮鍙樺姩绯绘暟
     double ha = _addendumCoeff * m;
     if (x1 + x2 != 0)
     {
-        ha = (_addendumCoeff + x1 - y_delt) * m; // 齿1的齿顶高
+        ha = (_addendumCoeff + x1 - y_delt) * m; // 榻?鐨勯娇椤堕珮
     }
     
-    double Rb = Rref * std::cos(phi); // 基圆半径
-    double Ra = Rref + ha;            // 齿顶圆半径
+    double Rb = Rref * std::cos(phi); // 鍩哄渾鍗婂緞
+    double Ra = Rref + ha;            // 榻块《鍦嗗崐寰?
     
-    // 齿根高计算
+    // 榻挎牴楂樿绠?
     double hf = _dedendumCoeff * m;
     if (x1 + x2 != 0)
     {
-        hf = (_dedendumCoeff - x1) * m; // 齿1的齿根高
+        hf = (_dedendumCoeff - x1) * m; // 榻?鐨勯娇鏍归珮
     }
     
-    double Rf = Rref - hf; // 齿根圆半径
+    double Rf = Rref - hf; // 榻挎牴鍦嗗崐寰?
 
-    // 确保齿根圆不小于一个合理值
+    // 纭繚榻挎牴鍦嗕笉灏忎簬涓€涓悎鐞嗗€?
     if (Rf < 0)
         Rf = 0.1 * m;
 
-    // 角度计算
-    double angularPitch = 2.0 * M_PI / Z; // 齿距角
+    // 瑙掑害璁＄畻
+    double angularPitch = 2.0 * M_PI / Z; // 榻胯窛瑙?
     
-    // 齿厚半角 (在分度圆上)
-    // 对于变位齿轮，齿厚会变化
+    // 榻垮帤鍗婅 (鍦ㄥ垎搴﹀渾涓?
+    // 瀵逛簬鍙樹綅榻胯疆锛岄娇鍘氫細鍙樺寲
     double toothThicknessHalfAngle;
     if (x1 + x2 == 0)
     {
@@ -257,117 +257,117 @@ namespace Command {
     }
     else
     {
-        // 变位齿轮的齿厚半角：s = m(π/2 + 2x tanφ)
+        // 鍙樹綅榻胯疆鐨勯娇鍘氬崐瑙掞細s = m(蟺/2 + 2x tan蠁)
         double s = m * (M_PI / 2.0 + 2 * x1 * std::tan(phi));
         toothThicknessHalfAngle = s / (2.0 * Rref);
     }
 
-    // 渐开线参数范围
+    // 娓愬紑绾垮弬鏁拌寖鍥?
     double thetaStart = 0.0;
     if (Rf > Rb)
     {
-        // 齿根圆在基圆外，渐开线从齿根圆开始
+        // 榻挎牴鍦嗗湪鍩哄渾澶栵紝娓愬紑绾夸粠榻挎牴鍦嗗紑濮?
         thetaStart = std::sqrt((Rf * Rf - Rb * Rb)) / Rb;
     }
     double thetaEnd = std::sqrt((Ra * Ra - Rb * Rb)) / Rb;
 
-    // 生成单个齿的渐开线点
+    // 鐢熸垚鍗曚釜榻跨殑娓愬紑绾跨偣
     const int numPoints = 20;
     std::vector<gp_Pnt> involuteLeft;
     std::vector<gp_Pnt> involuteRight;
 
-    // 修型起点半径（从齿顶向下 _tipReliefLength 距离）
+    // 淇瀷璧风偣鍗婂緞锛堜粠榻块《鍚戜笅 _tipReliefLength 璺濈锛?
     double R_relief_start = Ra - _tipReliefLength;
 
-    // ===== 调试输出：齿轮参数 =====
-    qDebug() << "========== 第一个齿轮参数 ==========";
-    qDebug() << "齿数 Z =" << Z;
-    qDebug() << "变位系数 x1 =" << x1;
-    qDebug() << "齿顶圆半径 Ra =" << Ra << "mm";
-    qDebug() << "齿根圆半径 Rf =" << Rf << "mm";
-    qDebug() << "基圆半径 Rb =" << Rb << "mm";
-    qDebug() << "分度圆半径 Rref =" << Rref << "mm";
-    qDebug() << "齿厚半角 =" << (toothThicknessHalfAngle * 180.0 / M_PI) << "度";
-    qDebug() << "渐开线参数范围: thetaStart =" << thetaStart 
+    // ===== 璋冭瘯杈撳嚭锛氶娇杞弬鏁?=====
+    qDebug() << "========== 绗竴涓娇杞弬鏁?==========";
+    qDebug() << "榻挎暟 Z =" << Z;
+    qDebug() << "鍙樹綅绯绘暟 x1 =" << x1;
+    qDebug() << "榻块《鍦嗗崐寰?Ra =" << Ra << "mm";
+    qDebug() << "榻挎牴鍦嗗崐寰?Rf =" << Rf << "mm";
+    qDebug() << "鍩哄渾鍗婂緞 Rb =" << Rb << "mm";
+    qDebug() << "鍒嗗害鍦嗗崐寰?Rref =" << Rref << "mm";
+    qDebug() << "toothThicknessHalfAngle =" << (toothThicknessHalfAngle * 180.0 / M_PI) << " deg";
+    qDebug() << "娓愬紑绾垮弬鏁拌寖鍥? thetaStart =" << thetaStart 
              << ", thetaEnd =" << thetaEnd;
     qDebug() << "===================================";
 
-    // ===== 调试输出：修型参数 =====
-    qDebug() << "========== 齿轮修型参数 ==========";
-    qDebug() << "齿顶圆半径 Ra =" << Ra << "mm";
-    qDebug() << "基圆半径 Rb =" << Rb << "mm";
-    qDebug() << "修型量 Ca =" << _tipReliefAmount << "mm";
-    qDebug() << "修型长度 Lca =" << _tipReliefLength << "mm";
-    qDebug() << "修型起点半径 R_start =" << R_relief_start << "mm";
+    // ===== 璋冭瘯杈撳嚭锛氫慨鍨嬪弬鏁?=====
+    qDebug() << "========== 榻胯疆淇瀷鍙傛暟 ==========";
+    qDebug() << "榻块《鍦嗗崐寰?Ra =" << Ra << "mm";
+    qDebug() << "鍩哄渾鍗婂緞 Rb =" << Rb << "mm";
+    qDebug() << "淇瀷閲?Ca =" << _tipReliefAmount << "mm";
+    qDebug() << "淇瀷闀垮害 Lca =" << _tipReliefLength << "mm";
+    qDebug() << "淇瀷璧风偣鍗婂緞 R_start =" << R_relief_start << "mm";
     qDebug() << "===================================";
 
-		int reliefPointCount = 0; // 统计被修型的点数
+		int reliefPointCount = 0; // 缁熻琚慨鍨嬬殑鐐规暟
 
 		for(int i = 0; i <= numPoints; ++i) {
 			double t		 = (double)i / numPoints;
 			double theta	 = thetaStart + t * (thetaEnd - thetaStart);
 			gp_Pnt pt		 = involutePoint(Rb, theta);
 
-			// 计算当前点的半径
+			// 璁＄畻褰撳墠鐐圭殑鍗婂緞
 			double R_current = std::sqrt(pt.X() * pt.X() + pt.Y() * pt.Y());
 
-			// ===== 抛物线修型 =====
-			// 如果启用修型且当前点在修型区域内
+			// ===== 鎶涚墿绾夸慨鍨?=====
+			// 濡傛灉鍚敤淇瀷涓斿綋鍓嶇偣鍦ㄤ慨鍨嬪尯鍩熷唴
 			if(_tipReliefAmount > 0 && _tipReliefLength > 0 && R_current > R_relief_start) {
-				// 到修型起点的距离
+				// 鍒颁慨鍨嬭捣鐐圭殑璺濈
 				double y	   = R_current - R_relief_start;
-				// 抛物线修型量: δ = Ca * (y/Lca)²
+				// 鎶涚墿绾夸慨鍨嬮噺: 未 = Ca * (y/Lca)虏
 				double delta   = _tipReliefAmount * (y / _tipReliefLength) * (y / _tipReliefLength);
 
-				// 计算该点的压力角
+				// 璁＄畻璇ョ偣鐨勫帇鍔涜
 				double alpha_y = std::acos(Rb / R_current);
 
-				// 简化处理：沿径向向内偏移
-				double nx	   = pt.X() / R_current; // 径向单位向量
+				// 绠€鍖栧鐞嗭細娌垮緞鍚戝悜鍐呭亸绉?
+				double nx	   = pt.X() / R_current; // 寰勫悜鍗曚綅鍚戦噺
 				double ny	   = pt.Y() / R_current;
 
-				// 调试输出：每个被修型的点
-				if(reliefPointCount < 5) { // 只输出前5个点避免刷屏
-					qDebug() << "点" << i << ": R=" << R_current << "mm, y=" << y
+				// 璋冭瘯杈撳嚭锛氭瘡涓淇瀷鐨勭偣
+				if(reliefPointCount < 5) { // 鍙緭鍑哄墠5涓偣閬垮厤鍒峰睆
+                    qDebug() << "point" << i << ": R=" << R_current << "mm, y=" << y
 							 << "mm, delta=" << delta << "mm";
-					qDebug() << "  原坐标:(" << pt.X() << "," << pt.Y() << ")";
+					qDebug() << "  鍘熷潗鏍?(" << pt.X() << "," << pt.Y() << ")";
 				}
 
-				// 向内偏移 delta 距离
+				// 鍚戝唴鍋忕Щ delta 璺濈
 				pt.SetX(pt.X() - delta * nx);
 				pt.SetY(pt.Y() - delta * ny);
 
 				if(reliefPointCount < 5) {
-					qDebug() << "  修型后:(" << pt.X() << "," << pt.Y() << ")";
+					qDebug() << "  淇瀷鍚?(" << pt.X() << "," << pt.Y() << ")";
 				}
 
 				reliefPointCount++;
 			}
 
-			// 计算渐开线在分度圆处的角度偏移
+			// 璁＄畻娓愬紑绾垮湪鍒嗗害鍦嗗鐨勮搴﹀亸绉?
 			double angleAtRef = involuteAngle(Rb, Rref);
 
-			// 旋转使齿对称于X轴
+			// 鏃嬭浆浣块娇瀵圭О浜嶺杞?
 			gp_Pnt ptRotated  = rotatePoint(pt, -angleAtRef - toothThicknessHalfAngle);
 			involuteLeft.push_back(ptRotated);
 
-			// 镜像得到另一侧渐开线
+			// 闀滃儚寰楀埌鍙︿竴渚ф笎寮€绾?
 			involuteRight.push_back(mirrorPoint(ptRotated));
 		}
 
-		// 调试输出：修型统计
-		qDebug() << "修型点数:" << reliefPointCount << "/" << (numPoints + 1);
+		// 璋冭瘯杈撳嚭锛氫慨鍨嬬粺璁?
+		qDebug() << "淇瀷鐐规暟:" << reliefPointCount << "/" << (numPoints + 1);
 		if(reliefPointCount == 0 && _tipReliefAmount > 0) {
-			qDebug() << "警告: 没有点被修型! 请检查修型长度是否太小或齿顶圆半径计算是否正确";
+            qDebug() << "Warning: no relief points were modified.";
 		}
 
 		BRepBuilderAPI_MakeWire wireBuilder;
 
-		// 为每个齿创建轮廓
+		// 涓烘瘡涓娇鍒涘缓杞粨
 		for(int tooth = 0; tooth < Z; ++tooth) {
 			double toothAngle = tooth * angularPitch;
 
-			// 渐开线左侧 (从齿根到齿顶)
+			// 娓愬紑绾垮乏渚?(浠庨娇鏍瑰埌榻块《)
 			for(size_t i = 0; i < involuteLeft.size() - 1; ++i) {
 				gp_Pnt p1 = rotatePoint(involuteLeft[i], toothAngle);
 				gp_Pnt p2 = rotatePoint(involuteLeft[i + 1], toothAngle);
@@ -377,12 +377,12 @@ namespace Command {
 				}
 			}
 
-			// 齿顶圆弧
+			// 榻块《鍦嗗姬
 			gp_Pnt tipLeft	= rotatePoint(involuteLeft.back(), toothAngle);
 			gp_Pnt tipRight = rotatePoint(involuteRight.back(), toothAngle);
 
 			if(tipLeft.Distance(tipRight) > 1e-6) {
-				// 使用圆弧连接齿顶
+				// 浣跨敤鍦嗗姬杩炴帴榻块《
 				gp_Pnt tipMid((tipLeft.X() + tipRight.X()) / 2.0 * Ra
 								  / std::sqrt(std::pow((tipLeft.X() + tipRight.X()) / 2.0, 2)
 											  + std::pow((tipLeft.Y() + tipRight.Y()) / 2.0, 2)),
@@ -396,7 +396,7 @@ namespace Command {
 						TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker.Value());
 						wireBuilder.Add(arcEdge);
 					} else {
-						// 如果圆弧失败，使用直线
+						// 濡傛灉鍦嗗姬澶辫触锛屼娇鐢ㄧ洿绾?
 						TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(tipLeft, tipRight);
 						wireBuilder.Add(edge);
 					}
@@ -406,7 +406,7 @@ namespace Command {
 				}
 			}
 
-			// 渐开线右侧 (从齿顶到齿根)
+			// 娓愬紑绾垮彸渚?(浠庨娇椤跺埌榻挎牴)
 			for(int i = (int)involuteRight.size() - 1; i > 0; --i) {
 				gp_Pnt p1 = rotatePoint(involuteRight[i], toothAngle);
 				gp_Pnt p2 = rotatePoint(involuteRight[i - 1], toothAngle);
@@ -416,49 +416,49 @@ namespace Command {
 				}
 			}
 
-			// 齿根圆弧 (连接到下一个齿)
+			// 榻挎牴鍦嗗姬 (杩炴帴鍒颁笅涓€涓娇)
 			gp_Pnt rootRight	= rotatePoint(involuteRight.front(), toothAngle);
 			gp_Pnt nextRootLeft = rotatePoint(involuteLeft.front(), toothAngle + angularPitch);
 
 			if(rootRight.Distance(nextRootLeft) > 1e-6) {
-				// 计算齿根圆弧的起始和结束角度
+				// 璁＄畻榻挎牴鍦嗗姬鐨勮捣濮嬪拰缁撴潫瑙掑害
 				double rootRightAngle	 = std::atan2(rootRight.Y(), rootRight.X());
 				double nextRootLeftAngle = std::atan2(nextRootLeft.Y(), nextRootLeft.X());
-				qDebug() << " 第一个齿轮 cya 0312 ========== 齿根点调试信息 ==========";
-qDebug() << "toothAngle:" << toothAngle << "rad (" << toothAngle * 180/M_PI << "°)";
-qDebug() << "angularPitch:" << angularPitch << "rad (" << angularPitch * 180/M_PI << "°)";
+				qDebug() << " 绗竴涓娇杞?cya 0312 ========== 榻挎牴鐐硅皟璇曚俊鎭?==========";
+qDebug() << "toothAngle:" << toothAngle << "rad (" << toothAngle * 180/M_PI << "掳)";
+qDebug() << "angularPitch:" << angularPitch << "rad (" << angularPitch * 180/M_PI << "掳)";
 qDebug() << "next tooth angle:" << toothAngle + angularPitch << "rad (" 
-         << (toothAngle + angularPitch) * 180/M_PI << "°)";
+         << (toothAngle + angularPitch) * 180/M_PI << "掳)";
 
-qDebug() << "\n--- 当前齿右侧渐开线起点 ---";
-qDebug() << "原始点 (involuteRight.front()):";
+qDebug() << "\n--- 褰撳墠榻垮彸渚ф笎寮€绾胯捣鐐?---";
+qDebug() << "鍘熷鐐?(involuteRight.front()):";
 qDebug() << "  X:" << involuteRight.front().X();
 qDebug() << "  Y:" << involuteRight.front().Y();
 qDebug() << "  Z:" << involuteRight.front().Z();
 
-				// 确保角度连续（处理跨越0度的情况）
+				// 纭繚瑙掑害杩炵画锛堝鐞嗚法瓒?搴︾殑鎯呭喌锛?
 				if(nextRootLeftAngle < rootRightAngle) {
 					nextRootLeftAngle += 2.0 * M_PI;
-					qDebug() << "cya 0312调整后nextRootLeft角度:" << nextRootLeftAngle * 180/M_PI << "°";
+					qDebug() << "cya 0312璋冩暣鍚巒extRootLeft瑙掑害:" << nextRootLeftAngle * 180/M_PI << "掳";
 				}
 
-				// 计算齿根圆弧的角度跨度
+				// 璁＄畻榻挎牴鍦嗗姬鐨勮搴﹁法搴?
 				double rootArcSpan = nextRootLeftAngle - rootRightAngle;
-				qDebug() << "cya 0312角度差:" <<rootArcSpan;
-				// 如果圆弧角度超过180度，限制为180度
+                qDebug() << "cya 0312 root arc span:" << rootArcSpan;
+				// 濡傛灉鍦嗗姬瑙掑害瓒呰繃180搴︼紝闄愬埗涓?80搴?
 				if(rootArcSpan > M_PI) {
-					qDebug() <<"齿根圆大于180度，使用180度圆弧";
-					// 计算180度圆弧的终点角度
+                    qDebug() << "root arc span > 180 deg, using 180 deg arc";
+					// 璁＄畻180搴﹀渾寮х殑缁堢偣瑙掑害
 					double limitedEndAngle = rootRightAngle + M_PI;
-					// 圆弧中点（恰好在起点偏移90度处）
+					// 鍦嗗姬涓偣锛堟伆濂藉湪璧风偣鍋忕Щ90搴﹀锛?
 					double rootMidAngle	   = rootRightAngle + M_PI / 2.0;
 					gp_Pnt rootMid(Rf * std::cos(rootMidAngle), Rf * std::sin(rootMidAngle), 0);
-					// 180度圆弧的终点
+					// 180搴﹀渾寮х殑缁堢偣
 					gp_Pnt arcEnd(Rf * std::cos(limitedEndAngle), Rf * std::sin(limitedEndAngle),
 								  0);
 
 					try {
-						// 创建180度圆弧
+						// 鍒涘缓180搴﹀渾寮?
 						GC_MakeArcOfCircle arcMaker(rootRight, rootMid, arcEnd);
 						if(arcMaker.IsDone()) {
 							wireBuilder.Add(BRepBuilderAPI_MakeEdge(arcMaker.Value()));
@@ -466,76 +466,76 @@ qDebug() << "  Z:" << involuteRight.front().Z();
 					} catch(...) {
 					}
 
-					// 用直线连接剩余部分（从圆弧终点到下一个齿的渐开线起点）
+					// 鐢ㄧ洿绾胯繛鎺ュ墿浣欓儴鍒嗭紙浠庡渾寮х粓鐐瑰埌涓嬩竴涓娇鐨勬笎寮€绾胯捣鐐癸級
 					if(arcEnd.Distance(nextRootLeft) > 1e-6) {
 						TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(arcEnd, nextRootLeft);
 						wireBuilder.Add(edge);
 					}
 				} else {
-					qDebug() <<"齿根圆小于180";
-					// 角度跨度过小则用直线，避免 GC_MakeArcOfCircle 抛出 StdFail_NotDone
+					qDebug() <<"榻挎牴鍦嗗皬浜?80";
+					// 瑙掑害璺ㄥ害杩囧皬鍒欑敤鐩寸嚎锛岄伩鍏?GC_MakeArcOfCircle 鎶涘嚭 StdFail_NotDone
 					const double minRootArcSpan = 1e-6;
 					if(rootArcSpan < minRootArcSpan) {
 						TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
 						wireBuilder.Add(edge);
-						qDebug() << "齿根圆弧角度跨度过小，使用直线连接";
+                        qDebug() << "root arc span too small, using line segment";
 					} else {
-					// 圆弧角度不超过180度，正常处理
+					// 鍦嗗姬瑙掑害涓嶈秴杩?80搴︼紝姝ｅ父澶勭悊
 					double rootMidAngle = (rootRightAngle + nextRootLeftAngle) / 2.0;
 					gp_Pnt rootMid(Rf * std::cos(rootMidAngle), Rf * std::sin(rootMidAngle), 0);
-					qDebug() << "中点角度:" << rootMidAngle * 180/M_PI << "°";
-					qDebug() << "中点坐标: (" << rootMid.X() << "," << rootMid.Y() << ")";
-					// 验证三点是否共线
+					qDebug() << "涓偣瑙掑害:" << rootMidAngle * 180/M_PI << "掳";
+					qDebug() << "涓偣鍧愭爣: (" << rootMid.X() << "," << rootMid.Y() << ")";
+					// 楠岃瘉涓夌偣鏄惁鍏辩嚎
 					double det = rootRight.X() * (rootMid.Y() - nextRootLeft.Y()) +
 					rootMid.X() * (nextRootLeft.Y() - rootRight.Y()) +
 					nextRootLeft.X() * (rootRight.Y() - rootMid.Y());
-	   qDebug() << "三点共线检测 (det):" << det;
+	   qDebug() << "涓夌偣鍏辩嚎妫€娴?(det):" << det;
 	   if(qAbs(det) < 1e-10) {
-		   qDebug() << "警告：三点接近共线，无法创建圆弧！";
+           qDebug() << "Warning: three points are nearly collinear.";
 	   }
-	   // 当三点接近共线(|det|较小)时，三点法会得到退化弧(显示为直线)，改用圆心法保证齿根为圆弧
+	   // 褰撲笁鐐规帴杩戝叡绾?|det|杈冨皬)鏃讹紝涓夌偣娉曚細寰楀埌閫€鍖栧姬(鏄剧ず涓虹洿绾?锛屾敼鐢ㄥ渾蹇冩硶淇濊瘉榻挎牴涓哄渾寮?
 	   const double detThreshold = 0.1;
 	   bool useCircleMethod = (qAbs(det) < detThreshold);
 	   if(useCircleMethod) {
-		   qDebug() << "det 过小，改用圆心法创建齿根圆弧";
+		   qDebug() << "det 杩囧皬锛屾敼鐢ㄥ渾蹇冩硶鍒涘缓榻挎牴鍦嗗姬";
 	   }
 	   try {
 		if(useCircleMethod) {
-			// 圆心法：在齿根圆上按角度创建圆弧，数值稳定
+			// 鍦嗗績娉曪細鍦ㄩ娇鏍瑰渾涓婃寜瑙掑害鍒涘缓鍦嗗姬锛屾暟鍊肩ǔ瀹?
 			gp_Circ circle(gp_Ax2(gp_Pnt(0,0,0), gp_Dir(0,0,1)), Rf);
 			GC_MakeArcOfCircle arcMaker2(circle, rootRightAngle, nextRootLeftAngle, true);
 			if(arcMaker2.IsDone()) {
 				TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker2.Value());
 				wireBuilder.Add(arcEdge);
-				qDebug() << "圆心法创建齿根圆弧成功";
+                qDebug() << "circle-center method created root arc successfully";
 			} else {
 				TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
 				wireBuilder.Add(edge);
-				qDebug() << "圆心法失败，使用直线替代";
+				qDebug() << "鍦嗗績娉曞け璐ワ紝浣跨敤鐩寸嚎鏇夸唬";
 			}
 		} else {
 			GC_MakeArcOfCircle arcMaker(rootRight, rootMid, nextRootLeft);
 			if(arcMaker.IsDone()) {
-				qDebug() << "圆弧创建成功！";
+                qDebug() << "arc created successfully";
 				TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker.Value());
 				wireBuilder.Add(arcEdge);
 			} else {
-				qDebug() << "圆弧创建失败，使用圆心法";
+				qDebug() << "鍦嗗姬鍒涘缓澶辫触锛屼娇鐢ㄥ渾蹇冩硶";
 				gp_Circ circle(gp_Ax2(gp_Pnt(0,0,0), gp_Dir(0,0,1)), Rf);
 				GC_MakeArcOfCircle arcMaker2(circle, rootRightAngle, nextRootLeftAngle, true);
 				if(arcMaker2.IsDone()) {
 					TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker2.Value());
 					wireBuilder.Add(arcEdge);
-					qDebug() << "使用圆心法创建圆弧成功";
+                    qDebug() << "circle-center method created arc successfully";
 				} else {
 					TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
 					wireBuilder.Add(edge);
-					qDebug() << "使用直线替代";
+					qDebug() << "浣跨敤鐩寸嚎鏇夸唬";
 				}
 			}
 		}
 	   } catch(...) {
-		qDebug() << "异常，使用圆心法创建圆弧";
+		qDebug() << "寮傚父锛屼娇鐢ㄥ渾蹇冩硶鍒涘缓鍦嗗姬";
 		try {
 			gp_Circ circle(gp_Ax2(gp_Pnt(0,0,0), gp_Dir(0,0,1)), Rf);
 			GC_MakeArcOfCircle arcMaker2(circle, rootRightAngle, nextRootLeftAngle, true);
@@ -557,54 +557,54 @@ qDebug() << "  Z:" << involuteRight.front().Z();
 		}
 
 		if(!wireBuilder.IsDone()) {
-			qDebug() << "第一个齿轮 Wire 构建未完成 (IsDone 为 false)";
+			qDebug() << "绗竴涓娇杞?Wire 鏋勫缓鏈畬鎴?(IsDone 涓?false)";
 			return TopoDS_Wire();
 		}
 		try {
 			return wireBuilder.Wire();
 		} catch(Standard_Failure& e) {
-			qDebug() << "第一个齿轮 Wire() 异常:" << e.GetMessageString();
+			qDebug() << "绗竴涓娇杞?Wire() 寮傚父:" << e.GetMessageString();
 			return TopoDS_Wire();
 		}
 	}
 
 	TopoDS_Wire GeoCommandCreateGear::createSecondGearProfile()
 	{
-		// 齿轮基本参数计算
+		// 榻胯疆鍩烘湰鍙傛暟璁＄畻
 		double m	= _module;
 		int	   Z	= _numberOfSecondTeeth;
 		double Z1   = _numberOfTeeth;
-		double phi	= _pressureAngle * M_PI / 180.0; // 转换为弧度
+		double phi	= _pressureAngle * M_PI / 180.0; // 杞崲涓哄姬搴?
 		double centerDistance;
 
 		double x1 = _x1;
 		double x2 = _x2;
 		double _y_delt;
-		qDebug()<<"变位系数"<<x1<<","<<x2;
+		qDebug()<<"鍙樹綅绯绘暟"<<x1<<","<<x2;
 		if (x1 + x2 == 0)
 		{
-			qDebug()<<"不用变位 直接计算中心距";
+            qDebug() << "No profile shift, using direct center distance calculation";
 			centerDistance = (Z1 + Z)*m/2;
 			
 		}
 		
 	  else
 	  {
-		qDebug() << "使用变位计算中心距及相关参数";
+		qDebug() << "浣跨敤鍙樹綅璁＄畻涓績璺濆強鐩稿叧鍙傛暟";
         
-        // 1. 计算未变位时的中心距
+        // 1. 璁＄畻鏈彉浣嶆椂鐨勪腑蹇冭窛
         double a = (Z1 + Z) * m / 2;
         
-        // 2. 计算总变位系数
+        // 2. 璁＄畻鎬诲彉浣嶇郴鏁?
         double x_sig = x1 + x2;
         
-        // 3. 计算啮合角 α'
-        // 根据公式：invα' = invα + 2 * (x1 + x2) * tan(φ) / (Z1 + Z)
-        double invAlpha = std::tan(phi) - phi; // 渐开线函数 invα
+        // 3. 璁＄畻鍟悎瑙?伪'
+        // 鏍规嵁鍏紡锛歩nv伪' = inv伪 + 2 * (x1 + x2) * tan(蠁) / (Z1 + Z)
+        double invAlpha = std::tan(phi) - phi; // 娓愬紑绾垮嚱鏁?inv伪
         double invAlphaPrime = invAlpha + 2 * x_sig * std::tan(phi) / (Z1 + Z);
         
-        // 求解啮合角 α'（需要迭代求解，这里使用牛顿法）
-        double alphaPrime = phi; // 初始值设为压力角
+        // 姹傝В鍟悎瑙?伪'锛堥渶瑕佽凯浠ｆ眰瑙ｏ紝杩欓噷浣跨敤鐗涢】娉曪級
+        double alphaPrime = phi; // 鍒濆鍊艰涓哄帇鍔涜
         double tolerance = 1e-10;
         int maxIterations = 100;
         
@@ -620,57 +620,57 @@ qDebug() << "  Z:" << involuteRight.front().Z();
                 break;
         }
         
-        // 4. 计算实际中心距 a'
+        // 4. 璁＄畻瀹為檯涓績璺?a'
         centerDistance = a * std::cos(phi) / std::cos(alphaPrime);
         
-        // 5. 计算中心距变动系数 y
+        // 5. 璁＄畻涓績璺濆彉鍔ㄧ郴鏁?y
         double y = (centerDistance - a) / m;
         
-        // 6. 计算齿顶高变动系数 y_delt
+        // 6. 璁＄畻榻块《楂樺彉鍔ㄧ郴鏁?y_delt
         double y_delt = x_sig - y;
         
-        // 存储计算得到的变位参数（如果需要）
+        // 瀛樺偍璁＄畻寰楀埌鐨勫彉浣嶅弬鏁帮紙濡傛灉闇€瑕侊級
         double _y = y;
         _y_delt = y_delt;
-        double _alphaPrime = alphaPrime * 180.0 / M_PI; // 转换为角度
+        double _alphaPrime = alphaPrime * 180.0 / M_PI; // 杞崲涓鸿搴?
         
-        qDebug() << "变位参数: x_sig =" << x_sig << ", y =" << y << ", y_delt =" << y_delt;
-        qDebug() << "啮合角 α' =" << _alphaPrime << "度";
-        qDebug() << "实际中心距 a' =" << centerDistance;
+        qDebug() << "鍙樹綅鍙傛暟: x_sig =" << x_sig << ", y =" << y << ", y_delt =" << y_delt;
+        qDebug() << "alphaPrime =" << _alphaPrime << " deg";
+        qDebug() << "瀹為檯涓績璺?a' =" << centerDistance;
     }
 
-    // 各圆半径计算（需要区分变位和非变位情况）
-    double Rref = Z * m / 2.0; // 分度圆半径
+    // 鍚勫渾鍗婂緞璁＄畻锛堥渶瑕佸尯鍒嗗彉浣嶅拰闈炲彉浣嶆儏鍐碉級
+    double Rref = Z * m / 2.0; // 鍒嗗害鍦嗗崐寰?
     
-    // 对于变位齿轮，齿顶高需要减去齿顶高变动系数
+    // 瀵逛簬鍙樹綅榻胯疆锛岄娇椤堕珮闇€瑕佸噺鍘婚娇椤堕珮鍙樺姩绯绘暟
     double ha = _addendumCoeff * m;
     if (x1 + x2 != 0)
     {
-		qDebug() << "使用变位计算齿顶高";
-        ha = (_addendumCoeff + x2 - (_y_delt)) * m; // 齿2的齿顶高
+        qDebug() << "Using profile shift to calculate addendum";
+        ha = (_addendumCoeff + x2 - (_y_delt)) * m; // 榻?鐨勯娇椤堕珮
     }
     
-    double Rb = Rref * std::cos(phi); // 基圆半径
-    double Ra = Rref + ha;            // 齿顶圆半径
+    double Rb = Rref * std::cos(phi); // 鍩哄渾鍗婂緞
+    double Ra = Rref + ha;            // 榻块《鍦嗗崐寰?
     
-    // 齿根高计算
+    // 榻挎牴楂樿绠?
     double hf = _dedendumCoeff * m;
     if (x1 + x2 != 0)
     {
-        hf = (_dedendumCoeff - x2) * m; // 齿2的齿根高
+        hf = (_dedendumCoeff - x2) * m; // 榻?鐨勯娇鏍归珮
     }
     
-    double Rf = Rref - hf; // 齿根圆半径
+    double Rf = Rref - hf; // 榻挎牴鍦嗗崐寰?
 
-    // 确保齿根圆不小于一个合理值
+    // 纭繚榻挎牴鍦嗕笉灏忎簬涓€涓悎鐞嗗€?
     if (Rf < 0)
         Rf = 0.1 * m;
 
-    // 角度计算
-    double angularPitch = 2.0 * M_PI / Z; // 齿距角
+    // 瑙掑害璁＄畻
+    double angularPitch = 2.0 * M_PI / Z; // 榻胯窛瑙?
     
-    // 齿厚半角 (在分度圆上)
-    // 对于变位齿轮，齿厚会变化
+    // 榻垮帤鍗婅 (鍦ㄥ垎搴﹀渾涓?
+    // 瀵逛簬鍙樹綅榻胯疆锛岄娇鍘氫細鍙樺寲
     double toothThicknessHalfAngle;
     if (x1 + x2 == 0)
     {
@@ -678,105 +678,105 @@ qDebug() << "  Z:" << involuteRight.front().Z();
     }
     else
     {
-        // 变位齿轮的齿厚半角：s = m(π/2 + 2x tanφ)
+        // 鍙樹綅榻胯疆鐨勯娇鍘氬崐瑙掞細s = m(蟺/2 + 2x tan蠁)
         double s = m * (M_PI / 2.0 + 2 * x2 * std::tan(phi));
         toothThicknessHalfAngle = s / (2.0 * Rref);
     }
 
-    // 渐开线参数范围
+    // 娓愬紑绾垮弬鏁拌寖鍥?
     double thetaStart = 0.0;
     if (Rf > Rb)
     {
-        // 齿根圆在基圆外，渐开线从齿根圆开始
+        // 榻挎牴鍦嗗湪鍩哄渾澶栵紝娓愬紑绾夸粠榻挎牴鍦嗗紑濮?
         thetaStart = std::sqrt((Rf * Rf - Rb * Rb)) / Rb;
     }
     double thetaEnd = std::sqrt((Ra * Ra - Rb * Rb)) / Rb;
 
-		// 生成单个齿的渐开线点
+		// 鐢熸垚鍗曚釜榻跨殑娓愬紑绾跨偣
 		const int			numPoints = 20;
 		std::vector<gp_Pnt> involuteLeft;
 		std::vector<gp_Pnt> involuteRight;
 
-		// 修型起点半径（从齿顶向下 _tipReliefLength2 距离）
+		// 淇瀷璧风偣鍗婂緞锛堜粠榻块《鍚戜笅 _tipReliefLength2 璺濈锛?
 		double				R_relief_start = Ra - _tipReliefLength2;
 
-		// ===== 调试输出：修型参数 =====
-		qDebug() << "========== 第二个齿轮修型参数 ==========";
-		qDebug() << "齿顶圆半径 Ra =" << Ra << "mm";
-		qDebug() << "基圆半径 Rb =" << Rb << "mm";
-		qDebug() << "修型量 Ca =" << _tipReliefAmount2 << "mm";
-		qDebug() << "修型长度 Lca =" << _tipReliefLength2 << "mm";
-		qDebug() << "修型起点半径 R_start =" << R_relief_start << "mm";
-		qDebug() << "中心距 a =" << centerDistance << "mm";
+		// ===== 璋冭瘯杈撳嚭锛氫慨鍨嬪弬鏁?=====
+		qDebug() << "========== 绗簩涓娇杞慨鍨嬪弬鏁?==========";
+		qDebug() << "榻块《鍦嗗崐寰?Ra =" << Ra << "mm";
+		qDebug() << "鍩哄渾鍗婂緞 Rb =" << Rb << "mm";
+		qDebug() << "淇瀷閲?Ca =" << _tipReliefAmount2 << "mm";
+		qDebug() << "淇瀷闀垮害 Lca =" << _tipReliefLength2 << "mm";
+		qDebug() << "淇瀷璧风偣鍗婂緞 R_start =" << R_relief_start << "mm";
+		qDebug() << "涓績璺?a =" << centerDistance << "mm";
 		qDebug() << "===================================";
 
-		int reliefPointCount = 0; // 统计被修型的点数
+		int reliefPointCount = 0; // 缁熻琚慨鍨嬬殑鐐规暟
 
 		for(int i = 0; i <= numPoints; ++i) {
 			double t		 = (double)i / numPoints;
 			double theta	 = thetaStart + t * (thetaEnd - thetaStart);
 			gp_Pnt pt		 = involutePoint(Rb, theta);
 
-			// 计算当前点的半径
+			// 璁＄畻褰撳墠鐐圭殑鍗婂緞
 			double R_current = std::sqrt(pt.X() * pt.X() + pt.Y() * pt.Y());
 
-			// ===== 抛物线修型 =====
-			// 如果启用修型且当前点在修型区域内
+			// ===== 鎶涚墿绾夸慨鍨?=====
+			// 濡傛灉鍚敤淇瀷涓斿綋鍓嶇偣鍦ㄤ慨鍨嬪尯鍩熷唴
 			if(_tipReliefAmount2 > 0 && _tipReliefLength2 > 0 && R_current > R_relief_start) {
-				// 到修型起点的距离
+				// 鍒颁慨鍨嬭捣鐐圭殑璺濈
 				double y	   = R_current - R_relief_start;
-				// 抛物线修型量: δ = Ca * (y/Lca)²
+				// 鎶涚墿绾夸慨鍨嬮噺: 未 = Ca * (y/Lca)虏
 				double delta   = _tipReliefAmount2 * (y / _tipReliefLength2) * (y / _tipReliefLength2);
 
-				// 计算该点的压力角
+				// 璁＄畻璇ョ偣鐨勫帇鍔涜
 				double alpha_y = std::acos(Rb / R_current);
 
-				// 简化处理：沿径向向内偏移
-				double nx	   = pt.X() / R_current; // 径向单位向量
+				// 绠€鍖栧鐞嗭細娌垮緞鍚戝悜鍐呭亸绉?
+				double nx	   = pt.X() / R_current; // 寰勫悜鍗曚綅鍚戦噺
 				double ny	   = pt.Y() / R_current;
 
-				// 调试输出：每个被修型的点
-				if(reliefPointCount < 5) { // 只输出前5个点避免刷屏
-					qDebug() << "点" << i << ": R=" << R_current << "mm, y=" << y
+				// 璋冭瘯杈撳嚭锛氭瘡涓淇瀷鐨勭偣
+				if(reliefPointCount < 5) { // 鍙緭鍑哄墠5涓偣閬垮厤鍒峰睆
+                    qDebug() << "point" << i << ": R=" << R_current << "mm, y=" << y
 							 << "mm, delta=" << delta << "mm";
-					qDebug() << "  原坐标:(" << pt.X() << "," << pt.Y() << ")";
+					qDebug() << "  鍘熷潗鏍?(" << pt.X() << "," << pt.Y() << ")";
 				}
 
-				// 向内偏移 delta 距离
+				// 鍚戝唴鍋忕Щ delta 璺濈
 				pt.SetX(pt.X() - delta * nx);
 				pt.SetY(pt.Y() - delta * ny);
 
 				if(reliefPointCount < 5) {
-					qDebug() << "  修型后:(" << pt.X() << "," << pt.Y() << ")";
+					qDebug() << "  淇瀷鍚?(" << pt.X() << "," << pt.Y() << ")";
 				}
 
 				reliefPointCount++;
 			}
 
-			// 计算渐开线在分度圆处的角度偏移
+			// 璁＄畻娓愬紑绾垮湪鍒嗗害鍦嗗鐨勮搴﹀亸绉?
 			double angleAtRef = involuteAngle(Rb, Rref);
 
-			// 旋转使齿对称于X轴
+			// 鏃嬭浆浣块娇瀵圭О浜嶺杞?
 			gp_Pnt ptRotated  = rotatePoint(pt, -angleAtRef - toothThicknessHalfAngle);
 			involuteLeft.push_back(ptRotated);
 
-			// 镜像得到另一侧渐开线
+			// 闀滃儚寰楀埌鍙︿竴渚ф笎寮€绾?
 			involuteRight.push_back(mirrorPoint(ptRotated));
 		}
 
-		// 调试输出：修型统计
-		qDebug() << "修型点数:" << reliefPointCount << "/" << (numPoints + 1);
+		// 璋冭瘯杈撳嚭锛氫慨鍨嬬粺璁?
+		qDebug() << "淇瀷鐐规暟:" << reliefPointCount << "/" << (numPoints + 1);
 		if(reliefPointCount == 0 && _tipReliefAmount2 > 0) {
-			qDebug() << "警告: 没有点被修型! 请检查修型长度是否太小或齿顶圆半径计算是否正确";
+            qDebug() << "Warning: no relief points were modified.";
 		}
 
 		BRepBuilderAPI_MakeWire wireBuilder;
 
-		// 为每个齿创建轮廓（先在 (0,0,0) 创建）
+		// 涓烘瘡涓娇鍒涘缓杞粨锛堝厛鍦?(0,0,0) 鍒涘缓锛?
 		for(int tooth = 0; tooth < Z; ++tooth) {
 			double toothAngle = tooth * angularPitch;
 
-			// 渐开线左侧 (从齿根到齿顶)
+			// 娓愬紑绾垮乏渚?(浠庨娇鏍瑰埌榻块《)
 			for(size_t i = 0; i < involuteLeft.size() - 1; ++i) {
 				gp_Pnt p1 = rotatePoint(involuteLeft[i], toothAngle);
 				gp_Pnt p2 = rotatePoint(involuteLeft[i + 1], toothAngle);
@@ -786,12 +786,12 @@ qDebug() << "  Z:" << involuteRight.front().Z();
 				}
 			}
 
-			// 齿顶圆弧
+			// 榻块《鍦嗗姬
 			gp_Pnt tipLeft	= rotatePoint(involuteLeft.back(), toothAngle);
 			gp_Pnt tipRight = rotatePoint(involuteRight.back(), toothAngle);
 
 			if(tipLeft.Distance(tipRight) > 1e-6) {
-				// 使用圆弧连接齿顶
+				// 浣跨敤鍦嗗姬杩炴帴榻块《
 				gp_Pnt tipMid((tipLeft.X() + tipRight.X()) / 2.0 * Ra
 								  / std::sqrt(std::pow((tipLeft.X() + tipRight.X()) / 2.0, 2)
 											  + std::pow((tipLeft.Y() + tipRight.Y()) / 2.0, 2)),
@@ -805,7 +805,7 @@ qDebug() << "  Z:" << involuteRight.front().Z();
 						TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker.Value());
 						wireBuilder.Add(arcEdge);
 					} else {
-						// 如果圆弧失败，使用直线
+						// 濡傛灉鍦嗗姬澶辫触锛屼娇鐢ㄧ洿绾?
 						TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(tipLeft, tipRight);
 						wireBuilder.Add(edge);
 					}
@@ -815,7 +815,7 @@ qDebug() << "  Z:" << involuteRight.front().Z();
 				}
 			}
 
-			// 渐开线右侧 (从齿顶到齿根)
+			// 娓愬紑绾垮彸渚?(浠庨娇椤跺埌榻挎牴)
 			for(int i = (int)involuteRight.size() - 1; i > 0; --i) {
 				gp_Pnt p1 = rotatePoint(involuteRight[i], toothAngle);
 				gp_Pnt p2 = rotatePoint(involuteRight[i - 1], toothAngle);
@@ -825,47 +825,47 @@ qDebug() << "  Z:" << involuteRight.front().Z();
 				}
 			}
 
-			// 齿根圆弧 (连接到下一个齿)
+			// 榻挎牴鍦嗗姬 (杩炴帴鍒颁笅涓€涓娇)
 			gp_Pnt rootRight	= rotatePoint(involuteRight.front(), toothAngle);
 			gp_Pnt nextRootLeft = rotatePoint(involuteLeft.front(), toothAngle + angularPitch);
 
 			if(rootRight.Distance(nextRootLeft) > 1e-6) {
-				// 计算齿根圆弧的起始和结束角度
+				// 璁＄畻榻挎牴鍦嗗姬鐨勮捣濮嬪拰缁撴潫瑙掑害
 				double rootRightAngle	 = std::atan2(rootRight.Y(), rootRight.X());
 				double nextRootLeftAngle = std::atan2(nextRootLeft.Y(), nextRootLeft.X());
-				qDebug() << " 第二个齿轮 cya 0312 ========== 齿根点调试信息 ==========";
-				qDebug() << "toothAngle:" << toothAngle << "rad (" << toothAngle * 180/M_PI << "°)";
-				qDebug() << "angularPitch:" << angularPitch << "rad (" << angularPitch * 180/M_PI << "°)";
+				qDebug() << " 绗簩涓娇杞?cya 0312 ========== 榻挎牴鐐硅皟璇曚俊鎭?==========";
+				qDebug() << "toothAngle:" << toothAngle << "rad (" << toothAngle * 180/M_PI << "掳)";
+				qDebug() << "angularPitch:" << angularPitch << "rad (" << angularPitch * 180/M_PI << "掳)";
 				qDebug() << "next tooth angle:" << toothAngle + angularPitch << "rad ("
-				         << (toothAngle + angularPitch) * 180/M_PI << "°)";
-				qDebug() << "\n--- 当前齿右侧渐开线起点 ---";
-				qDebug() << "原始点 (involuteRight.front()):";
+				         << (toothAngle + angularPitch) * 180/M_PI << "掳)";
+				qDebug() << "\n--- 褰撳墠榻垮彸渚ф笎寮€绾胯捣鐐?---";
+				qDebug() << "鍘熷鐐?(involuteRight.front()):";
 				qDebug() << "  X:" << involuteRight.front().X();
 				qDebug() << "  Y:" << involuteRight.front().Y();
 				qDebug() << "  Z:" << involuteRight.front().Z();
 
-				// 确保角度连续（处理跨越0度的情况）
+				// 纭繚瑙掑害杩炵画锛堝鐞嗚法瓒?搴︾殑鎯呭喌锛?
 				if(nextRootLeftAngle < rootRightAngle) {
 					nextRootLeftAngle += 2.0 * M_PI;
-					qDebug() << "cya 0312调整后nextRootLeft角度:" << nextRootLeftAngle * 180/M_PI << "°";
+					qDebug() << "cya 0312璋冩暣鍚巒extRootLeft瑙掑害:" << nextRootLeftAngle * 180/M_PI << "掳";
 				}
 
-				// 计算齿根圆弧的角度跨度
+				// 璁＄畻榻挎牴鍦嗗姬鐨勮搴﹁法搴?
 				double rootArcSpan = nextRootLeftAngle - rootRightAngle;
-				qDebug() << "cya 0312角度差:" << rootArcSpan;
-				// 如果圆弧角度超过180度，限制为180度
+                qDebug() << "cya 0312 root arc span:" << rootArcSpan;
+				// 濡傛灉鍦嗗姬瑙掑害瓒呰繃180搴︼紝闄愬埗涓?80搴?
 				if(rootArcSpan > M_PI) {
-					qDebug() << "齿根圆大于180度，使用180度圆弧";
-					// 计算180度圆弧的终点角度
+                    qDebug() << "root arc span > 180 deg, using 180 deg arc";
+					// 璁＄畻180搴﹀渾寮х殑缁堢偣瑙掑害
 					double limitedEndAngle = rootRightAngle + M_PI;
-					// 圆弧中点（恰好在起点偏移90度处）
+					// 鍦嗗姬涓偣锛堟伆濂藉湪璧风偣鍋忕Щ90搴﹀锛?
 					double rootMidAngle	   = rootRightAngle + M_PI / 2.0;
 					gp_Pnt rootMid(Rf * std::cos(rootMidAngle), Rf * std::sin(rootMidAngle), 0);
-					// 180度圆弧的终点
+					// 180搴﹀渾寮х殑缁堢偣
 					gp_Pnt arcEnd(Rf * std::cos(limitedEndAngle), Rf * std::sin(limitedEndAngle), 0);
 
 					try {
-						// 创建180度圆弧
+						// 鍒涘缓180搴﹀渾寮?
 						GC_MakeArcOfCircle arcMaker(rootRight, rootMid, arcEnd);
 						if(arcMaker.IsDone()) {
 							wireBuilder.Add(BRepBuilderAPI_MakeEdge(arcMaker.Value()));
@@ -873,48 +873,48 @@ qDebug() << "  Z:" << involuteRight.front().Z();
 					} catch(...) {
 					}
 
-					// 用直线连接剩余部分（从圆弧终点到下一个齿的渐开线起点）
+					// 鐢ㄧ洿绾胯繛鎺ュ墿浣欓儴鍒嗭紙浠庡渾寮х粓鐐瑰埌涓嬩竴涓娇鐨勬笎寮€绾胯捣鐐癸級
 					if(arcEnd.Distance(nextRootLeft) > 1e-6) {
 						TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(arcEnd, nextRootLeft);
 						wireBuilder.Add(edge);
 					}
 				} else {
-					qDebug() << "齿根圆小于180";
-					// 圆弧角度不超过180度，正常处理
+					qDebug() << "榻挎牴鍦嗗皬浜?80";
+					// 鍦嗗姬瑙掑害涓嶈秴杩?80搴︼紝姝ｅ父澶勭悊
 					double rootMidAngle = (rootRightAngle + nextRootLeftAngle) / 2.0;
 					gp_Pnt rootMid(Rf * std::cos(rootMidAngle), Rf * std::sin(rootMidAngle), 0);
-					qDebug() << "中点角度:" << rootMidAngle * 180/M_PI << "°";
-					qDebug() << "中点坐标: (" << rootMid.X() << "," << rootMid.Y() << ")";
-					// 验证三点是否共线
+					qDebug() << "涓偣瑙掑害:" << rootMidAngle * 180/M_PI << "掳";
+					qDebug() << "涓偣鍧愭爣: (" << rootMid.X() << "," << rootMid.Y() << ")";
+					// 楠岃瘉涓夌偣鏄惁鍏辩嚎
 					double det = rootRight.X() * (rootMid.Y() - nextRootLeft.Y()) +
 						rootMid.X() * (nextRootLeft.Y() - rootRight.Y()) +
 						nextRootLeft.X() * (rootRight.Y() - rootMid.Y());
-					qDebug() << "三点共线检测 (det):" << det;
+					qDebug() << "涓夌偣鍏辩嚎妫€娴?(det):" << det;
 					if(qAbs(det) < 1e-10) {
-						qDebug() << "警告：三点接近共线，无法创建圆弧！";
+                        qDebug() << "Warning: three points are nearly collinear.";
 					}
 					try {
 						GC_MakeArcOfCircle arcMaker(rootRight, rootMid, nextRootLeft);
 						if(arcMaker.IsDone()) {
-							qDebug() << "圆弧创建成功！";
+                            qDebug() << "arc created successfully";
 							TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker.Value());
 							wireBuilder.Add(arcEdge);
 						} else {
-							qDebug() << "圆弧创建失败，使用三点圆弧的替代方法";
+							qDebug() << "鍦嗗姬鍒涘缓澶辫触锛屼娇鐢ㄤ笁鐐瑰渾寮х殑鏇夸唬鏂规硶";
 							gp_Circ circle(gp_Ax2(gp_Pnt(0,0,0), gp_Dir(0,0,1)), Rf);
 							GC_MakeArcOfCircle arcMaker2(circle, rootRightAngle, nextRootLeftAngle, true);
 							if(arcMaker2.IsDone()) {
 								TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker2.Value());
 								wireBuilder.Add(arcEdge);
-								qDebug() << "使用圆心法创建圆弧成功";
+                                qDebug() << "circle-center method created arc successfully";
 							} else {
 								TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
 								wireBuilder.Add(edge);
-								qDebug() << "使用直线替代";
+								qDebug() << "浣跨敤鐩寸嚎鏇夸唬";
 							}
 						}
 					} catch(...) {
-						qDebug() << "异常，使用圆心法创建圆弧";
+						qDebug() << "寮傚父锛屼娇鐢ㄥ渾蹇冩硶鍒涘缓鍦嗗姬";
 						try {
 							gp_Circ circle(gp_Ax2(gp_Pnt(0,0,0), gp_Dir(0,0,1)), Rf);
 							GC_MakeArcOfCircle arcMaker2(circle, rootRightAngle, nextRootLeftAngle, true);
@@ -934,10 +934,10 @@ qDebug() << "  Z:" << involuteRight.front().Z();
 			}
 		}
 
-		// 先在 (0,0,0) 创建 Wire
+		// 鍏堝湪 (0,0,0) 鍒涘缓 Wire
 		TopoDS_Wire wire = wireBuilder.Wire();
 
-		// 最后统一平移到 (0, centerDistance, 0)
+		// 鏈€鍚庣粺涓€骞崇Щ鍒?(0, centerDistance, 0)
 		gp_Trsf transform;
 		transform.SetTranslation(gp_Vec(0, centerDistance, 0));
 		BRepBuilderAPI_Transform transformMaker(wire, transform);
@@ -946,21 +946,74 @@ qDebug() << "  Z:" << involuteRight.front().Z();
 		return transformedWire;
 	}
 
-	TopoDS_Shape GeoCommandCreateGear::extrudeProfile(const TopoDS_Wire& profile)
+	double GeoCommandCreateGear::centerDistanceBetweenGears() const
 	{
-		// 在XY平面上创建面
+		const double m	 = _module;
+		const int	   Z1	= _numberOfTeeth;
+		const int	   Z2	= _numberOfSecondTeeth;
+		const double x1	 = _x1;
+		const double x2	 = _x2;
+		const double phi = _pressureAngle * M_PI / 180.0;
+
+		if(x1 + x2 == 0) {
+			return (Z1 + Z2) * m / 2.0;
+		}
+
+		const double a			  = (Z1 + Z2) * m / 2.0;
+		const double x_sig			  = x1 + x2;
+		const double invAlpha		  = std::tan(phi) - phi;
+		const double invAlphaPrime = invAlpha + 2 * x_sig * std::tan(phi) / (Z1 + Z2);
+
+		double alphaPrime = phi;
+		const double tolerance	 = 1e-10;
+		const int	 maxIterations = 100;
+		for(int i = 0; i < maxIterations; i++) {
+			const double f	   = std::tan(alphaPrime) - alphaPrime - invAlphaPrime;
+			const double fPrime = 1.0 / (std::cos(alphaPrime) * std::cos(alphaPrime)) - 1.0;
+			const double delta  = f / fPrime;
+			alphaPrime -= delta;
+			if(std::abs(delta) < tolerance)
+				break;
+		}
+		return a * std::cos(phi) / std::cos(alphaPrime);
+	}
+
+	TopoDS_Wire GeoCommandCreateGear::createCenterHoleWire(double holeRadius,
+															const gp_Pnt& centerOnXYPlane) const
+	{
+		if(holeRadius <= 1e-9) {
+			return TopoDS_Wire();
+		}
+		gp_Ax2	 ax(centerOnXYPlane, gp_Dir(0, 0, 1));
+		gp_Circ	 circ(ax, holeRadius);
+		TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(circ);
+		BRepBuilderAPI_MakeWire wireMk(edge);
+		if(!wireMk.IsDone()) {
+			return TopoDS_Wire();
+		}
+		// 鍐呭瓟杈圭晫涓庨娇寤撳鐜柟鍚戠浉鍙嶏紝鏂瑰彲鍦ㄥ悓涓€骞抽潰闈㈠煙涓綔涓哄瓟
+		return TopoDS::Wire(wireMk.Wire().Reversed());
+	}
+
+	TopoDS_Shape GeoCommandCreateGear::extrudeProfile(const TopoDS_Wire& outerProfile,
+													  const TopoDS_Wire& innerHoleWire)
+	{
+		// 鍦╔Y骞抽潰涓婂垱寤洪潰锛堝鐜?+ 涓績瀛旈棴鐜級
 		gp_Pln					plane(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1));
-		BRepBuilderAPI_MakeFace faceMaker(plane, profile,
-										  Standard_True); // Standard_True 表示检查并修复 wire
+		BRepBuilderAPI_MakeFace faceMaker(plane, outerProfile,
+										  Standard_True); // Standard_True 琛ㄧず妫€鏌ュ苟淇 wire
+		if(!innerHoleWire.IsNull()) {
+			faceMaker.Add(innerHoleWire);
+		}
 		if(!faceMaker.IsDone()) {
 			return TopoDS_Shape();
 		}
 
 		TopoDS_Face			  face = faceMaker.Face();
 
-		// 沿Z轴拉伸
-		// 使用与 GeoCommandMakeExtrusion 相同的参数：Copy=true, Canonize=false
-		// 这样可以确保生成 Solid 而不是 Shell
+		// 娌縕杞存媺浼?
+		// 浣跨敤涓?GeoCommandMakeExtrusion 鐩稿悓鐨勫弬鏁帮細Copy=true, Canonize=false
+		// 杩欐牱鍙互纭繚鐢熸垚 Solid 鑰屼笉鏄?Shell
 		gp_Vec				  extrusionDir(0, 0, _thickness);
 		BRepPrimAPI_MakePrism prismMaker(face, extrusionDir, true, false);
 
@@ -973,85 +1026,52 @@ qDebug() << "  Z:" << involuteRight.front().Z();
 
 	bool GeoCommandCreateGear::execute()
 	{
-		// 创建第一个齿轮2D轮廓
+		// 鍒涘缓绗竴涓娇杞?D杞粨
 		TopoDS_Wire profile = createGearProfile();
 		if(profile.IsNull()) {
 			return false;
 		}
 
-		// 拉伸生成3D齿轮
-		TopoDS_Shape gearShape = extrudeProfile(profile);
-		if(gearShape.IsNull()) {
-			return false;
-		}
-
-		// 创建第二个齿轮2D轮廓
+		// 鍒涘缓绗簩涓娇杞?D杞粨
 		TopoDS_Wire secondProfile = createSecondGearProfile();
 		if(secondProfile.IsNull()) {
 			return false;
 		}
 
-		// 拉伸生成第二个3D齿轮
-		TopoDS_Shape secondGearShape = extrudeProfile(secondProfile);
+		const double centerDistance = centerDistanceBetweenGears();
+
+		// 榻胯疆1锛氫腑蹇冨唴瀛旓紙鍒嗗害鍦嗙洿寰?= m * Z锛屽瓟寰?= 0.4 脳 鍒嗗害鍦嗙洿寰勶級
+		const double pitchDiameter	= _module * static_cast<double>(_numberOfTeeth);
+		const double holeDiameter	= 0.4 * pitchDiameter;
+		const double holeRadius		= holeDiameter / 2.0;
+		TopoDS_Wire				   holeWire1 = createCenterHoleWire(holeRadius, gp_Pnt(0, 0, 0));
+
+		// 鎷変几鐢熸垚3D榻胯疆
+		TopoDS_Shape gearShape = extrudeProfile(profile, holeWire1);
+		if(gearShape.IsNull()) {
+			return false;
+		}
+
+		// 榻胯疆2锛氬瓟涓績涓庡钩绉诲悗榻垮澂涓績 (0, centerDistance, 0) 閲嶅悎
+		const double pitchDiameter2  = _module * static_cast<double>(_numberOfSecondTeeth);
+		const double holeDiameter2   = 0.4 * pitchDiameter2;
+		const double holeRadius2	 = holeDiameter2 / 2.0;
+		TopoDS_Wire				   holeWire2 =
+			createCenterHoleWire(holeRadius2, gp_Pnt(0, centerDistance, 0));
+
+		// 鎷変几鐢熸垚绗簩涓?D榻胯疆
+		TopoDS_Shape secondGearShape = extrudeProfile(secondProfile, holeWire2);
 		if(secondGearShape.IsNull()) {
 			return false;
 		}
-		// 需要计算中心距 - 根据齿轮参数
-    double m = _module;
-    int Z1 = _numberOfTeeth;
-    int Z2 = _numberOfSecondTeeth;
-    double x1 = _x1;
-    double x2 = _x2;
-    double phi = _pressureAngle * M_PI / 180.0;
-    
-    // 计算中心距
-    double centerDistance;
-    if (x1 + x2 == 0)
-    {
-        // 非变位齿轮的标准中心距
-        centerDistance = (Z1 + Z2) * m / 2.0;
-    }
-    else
-    {
-        // 变位齿轮的中心距计算
-        // 1. 计算未变位时的中心距
-        double a = (Z1 + Z2) * m / 2.0;
-        
-        // 2. 计算总变位系数
-        double x_sig = x1 + x2;
-        
-        // 3. 计算啮合角 α'
-        double invAlpha = std::tan(phi) - phi;
-        double invAlphaPrime = invAlpha + 2 * x_sig * std::tan(phi) / (Z1 + Z2);
-        
-        // 求解啮合角 α'（牛顿迭代法）
-        double alphaPrime = phi;
-        double tolerance = 1e-10;
-        int maxIterations = 100;
-        
-        for (int i = 0; i < maxIterations; i++)
-        {
-            double f = std::tan(alphaPrime) - alphaPrime - invAlphaPrime;
-            double fPrime = 1.0 / (std::cos(alphaPrime) * std::cos(alphaPrime)) - 1.0;
-            
-            double delta = f / fPrime;
-            alphaPrime -= delta;
-            
-            if (std::abs(delta) < tolerance)
-                break;
-        }
-        
-        // 4. 计算实际中心距 a'
-        centerDistance = a * std::cos(phi) / std::cos(alphaPrime);
-    }
-    
-    // 计算旋转角度
+
+    // 璁＄畻鏃嬭浆瑙掑害
     double rotationAngle = 0.0;
     
-    // 根据齿数计算旋转角度
-    // 旋转半个齿的角度（对于第二个齿轮）
-    rotationAngle = M_PI / Z2;
-	// 对第二个齿轮进行旋转
+    // 鏍规嵁榻挎暟璁＄畻鏃嬭浆瑙掑害
+    // 鏃嬭浆鍗婁釜榻跨殑瑙掑害锛堝浜庣浜屼釜榻胯疆锛?
+    rotationAngle = M_PI / static_cast<double>(_numberOfSecondTeeth);
+	// 瀵圭浜屼釜榻胯疆杩涜鏃嬭浆
     if(std::abs(rotationAngle) > 1e-6) {
         gp_Trsf rotateTransform;
         gp_Ax1 rotationAxis(gp_Pnt(0, centerDistance, 0), gp_Dir(0, 0, 1));
@@ -1061,18 +1081,18 @@ qDebug() << "  Z:" << involuteRight.front().Z();
             secondGearShape = rotateMaker.Shape();
         }
     }
-		// 合并两个齿轮
+		// 鍚堝苟涓や釜榻胯疆
 		BRepAlgoAPI_Fuse fuseMaker(gearShape, secondGearShape);
 		if(!fuseMaker.IsDone()) {
 			return false;
 		}
 		TopoDS_Shape combinedShape = fuseMaker.Shape();
 
-		// 创建形状指针
+		// 鍒涘缓褰㈢姸鎸囬拡
 		TopoDS_Shape* shape		   = new TopoDS_Shape;
 		*shape					   = combinedShape;
 
-		// 创建几何集对象
+		// 鍒涘缓鍑犱綍闆嗗璞?
 		Geometry::GeometrySet* set = new Geometry::GeometrySet(Geometry::STEP);
 		set->setShape(shape);
 		_res = set;
@@ -1086,10 +1106,11 @@ qDebug() << "  Z:" << involuteRight.front().Z();
 			_geoData->appendGeometrySet(set);
 		}
 
-		// 创建参数对象
+		// 鍒涘缓鍙傛暟瀵硅薄
 		Geometry::GeometryParaGear* para = new Geometry::GeometryParaGear;
 		para->setName(_name);
 		para->setNumberOfTeeth(_numberOfTeeth);
+		para->setNumberOfSecondTeeth(_numberOfSecondTeeth);
 		para->setModule(_module);
 		para->setPressureAngle(_pressureAngle);
 		para->setAddendumCoefficient(_addendumCoeff);
@@ -1140,3 +1161,5 @@ qDebug() << "  Z:" << involuteRight.front().Z();
 		_res = nullptr;
 	}
 } // namespace Command
+
+
