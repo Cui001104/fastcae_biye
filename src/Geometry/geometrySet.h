@@ -26,6 +26,8 @@
 #include "geometryAPI.h"
 #include "DataProperty/DataBase.h"
 #include <QString>
+#include <QHash>
+#include <QList>
 //#include <TopoDS_Shape.hxx>
 //#include <vtkSmartPointer.h>
 
@@ -232,6 +234,20 @@ namespace Geometry
 
 		bool readPoly(QString name);
 
+		// ================== Semantic face tags  ==================
+		// 给本 Set 内的 BRep face 打语义标签，便于自动 BC 加载（齿轮优化模块需要）。
+		// faceId 通常取 face 在 TopExp_Explorer 中的索引，或 OCCT TShape 指针 hash。
+		/// 给一个面打标签（覆盖已有同 id 的标签）
+		void setSemanticTag(int faceId, const QString& tag);
+		/// 查询某面的标签；不存在则返回空串
+		QString getSemanticTag(int faceId) const;
+		/// 取所有打过该 tag 的面 id 列表
+		QList<int> getFacesByTag(const QString& tag) const;
+		/// 清空全部语义标签
+		void clearSemanticTags();
+		/// 整张表，便于序列化/调试
+		const QHash<int, QString>& getAllSemanticTags() const { return _faceTags; }
+
 	protected:
 		void writeSubSet(QDomDocument *doc, QDomElement *parent, bool isDiso = false);
 		void readSubSet(QDomElement *e, bool isDiso = false);
@@ -266,6 +282,9 @@ namespace Geometry
 		 * @since 2.5.0
 		 */
 		GeometryModelParaBase *_parameter{};
+
+		/// 语义标签表 (faceId -> tag)，由 GeoCommandCreateGear 等命令在生成几何后填充。
+		QHash<int, QString> _faceTags{};
 
 	private:
 		static int idOffset;

@@ -85,6 +85,14 @@ namespace Ui {
 			actionWorkingDir = new QAction(MainWindow);
 			actionWorkingDir->setObjectName(QString::fromUtf8("actionWorkingDir"));
 			actionWorkingDir->setIcon(icon1);
+			actionGearOpt = new QAction(MainWindow);
+			actionGearOpt->setObjectName(QString::fromUtf8("actionGearOpt"));
+			{
+				QIcon iconGearOpt;
+				iconGearOpt.addFile(QString::fromUtf8(":/QUI/geometry/gear.png"),
+				                    QSize(), QIcon::Normal, QIcon::Off);
+				actionGearOpt->setIcon(iconGearOpt);
+			}
 			actionSolve = new QAction(MainWindow);
 			actionSolve->setObjectName(QString::fromUtf8("actionSolve"));
 			actionSolve->setEnabled(false);
@@ -809,6 +817,7 @@ namespace Ui {
 			home_page				   = ribbon->addCategoryPage(QObject::tr("Home"));
 			new_pannel				   = home_page->addPannel(QObject::tr("File"));
 			solve_pannel			   = home_page->addPannel(QObject::tr("Case"));
+			gear_opt_pannel			   = home_page->addPannel(QObject::tr("Gear Opt"));
 			import_mesh_pannel		   = home_page->addPannel(QObject::tr("Import Mesh"));
 			import_geometry_pannel	   = home_page->addPannel(QObject::tr("Import Geometry"));
 			exec_script_pannel		   = home_page->addPannel(QObject::tr("Script"));
@@ -821,6 +830,7 @@ namespace Ui {
 				new_pannel->addMediumAction(actionOpen);
 				new_pannel->addMediumAction(actionSave);
 				solve_pannel->addLargeAction(actionSolve);
+				gear_opt_pannel->addLargeAction(actionGearOpt);
 				import_mesh_pannel->addLargeAction(actionImportMesh);
 				import_geometry_pannel->addLargeAction(actionImportGeometry);
 				exec_script_pannel->addMediumAction(actionExecute_Script);
@@ -1089,6 +1099,8 @@ namespace Ui {
 #endif // QT_CONFIG(shortcut)
 			actionWorkingDir->setText(
 				QCoreApplication::translate("MainWindow", "WorkingDir", nullptr));
+			actionGearOpt->setText(
+				QCoreApplication::translate("MainWindow", "\351\275\277\350\275\256\344\274\230\345\214\226", nullptr));
 			actionSolve->setText(QCoreApplication::translate("MainWindow", "Solve", nullptr));
 #if QT_CONFIG(shortcut)
 			actionSolve->setShortcut(QCoreApplication::translate("MainWindow", "F5", nullptr));

@@ -526,4 +526,30 @@ namespace Geometry {
 		_subSetList.clear();
 	}
 
+	// ==================== Semantic face tags  ====================
+
+	void GeometrySet::setSemanticTag(int faceId, const QString& tag)
+	{
+		_faceTags.insert(faceId, tag);
+	}
+
+	QString GeometrySet::getSemanticTag(int faceId) const
+	{
+		return _faceTags.value(faceId, QString());
+	}
+
+	QList<int> GeometrySet::getFacesByTag(const QString& tag) const
+	{
+		QList<int> result;
+		for(auto it = _faceTags.constBegin(); it != _faceTags.constEnd(); ++it) {
+			if(it.value() == tag) result.append(it.key());
+		}
+		return result;
+	}
+
+	void GeometrySet::clearSemanticTags()
+	{
+		_faceTags.clear();
+	}
+
 } // namespace Geometry

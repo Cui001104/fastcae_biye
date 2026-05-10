@@ -4,6 +4,7 @@
 #include "Geometry/geometryParaGear.h"
 
 #include <cmath>
+#include <limits>
 #include <vector>
 #include <QDebug>
 
@@ -32,6 +33,14 @@
 #include <TColgp_Array1OfPnt.hxx>
 #include <GC_MakeArcOfCircle.hxx>
 #include <Standard_Failure.hxx>
+
+#include <TopExp_Explorer.hxx>
+#include <BRepAdaptor_Surface.hxx>
+#include <GeomAbs_SurfaceType.hxx>
+#include <gp_Cylinder.hxx>
+#include <gp_Pln.hxx>
+#include <Bnd_Box.hxx>
+#include <BRepBndLib.hxx>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -81,6 +90,11 @@ namespace Command {
 	void GeoCommandCreateGear::setThickness(double t)
 	{
 		_thickness = t;
+	}
+
+	void GeoCommandCreateGear::setThickness2(double t)
+	{
+		_thickness2 = t;
 	}
 
 	void GeoCommandCreateGear::setExternalGear(bool external)
@@ -153,797 +167,264 @@ namespace Command {
 
 	TopoDS_Wire GeoCommandCreateGear::createGearProfile()
 	{
-		// 榻胯疆鍩烘湰鍙傛暟璁＄畻
-    double m  = _module;
-    int    Z  = _numberOfTeeth;
-    double Z2 = _numberOfSecondTeeth;  // 绗簩涓娇杞殑榻挎暟
-    double phi = _pressureAngle * M_PI / 180.0; // 杞崲涓哄姬搴?
-    
-    // 鍙樹綅绯绘暟
-    double x1 = _x1;  // 绗竴涓娇杞殑鍙樹綅绯绘暟
-    double x2 = _x2;  // 绗簩涓娇杞殑鍙樹綅绯绘暟锛堢敤浜庤绠椾腑蹇冭窛绛夛級
-    double centerDistance;
-    double y_delt = 0.0;  // 榻块《楂樺彉鍔ㄧ郴鏁?
-    double alphaPrime = phi;  // 鍟悎瑙掞紝榛樿涓哄帇鍔涜
+		// thin wrapper, real logic in buildGearProfileWire
+		return buildGearProfileWire(_numberOfTeeth, _numberOfSecondTeeth,
+		                            _x1, _x1 + _x2,
+		                            _tipReliefAmount, _tipReliefLength,
+		                            gp_Pnt(0, 0, 0));
+	}
 
-    // 璁＄畻涓績璺濆拰鍙樹綅鐩稿叧鍙傛暟
-    if (x1 + x2 == 0)
-    {
-        qDebug() << "绗竴涓娇杞細涓嶇敤鍙樹綅锛岀洿鎺ヨ绠椾腑蹇冭窛";
-        centerDistance = (Z + Z2) * m / 2;
-    }
-    else
-    {
-        qDebug() << "绗竴涓娇杞細浣跨敤鍙樹綅璁＄畻涓績璺濆強鐩稿叧鍙傛暟";
-        
-        // 1. 璁＄畻鏈彉浣嶆椂鐨勪腑蹇冭窛
-        double a = (Z + Z2) * m / 2;
-        
-        // 2. 璁＄畻鎬诲彉浣嶇郴鏁?
-        double x_sig = x1 + x2;
-        
-        // 3. 璁＄畻鍟悎瑙?伪'
-        double invAlpha = std::tan(phi) - phi; // 娓愬紑绾垮嚱鏁?inv伪
-        double invAlphaPrime = invAlpha + 2 * x_sig * std::tan(phi) / (Z + Z2);
-        
-        // 姹傝В鍟悎瑙?伪'锛堢墰椤胯凯浠ｆ硶锛?
-        alphaPrime = phi; // 鍒濆鍊艰涓哄帇鍔涜
-        double tolerance = 1e-10;
-        int maxIterations = 100;
-        
-        for (int i = 0; i < maxIterations; i++)
-        {
-            double f = std::tan(alphaPrime) - alphaPrime - invAlphaPrime;
-            double fPrime = 1.0 / (std::cos(alphaPrime) * std::cos(alphaPrime)) - 1.0;
-            
-            double delta = f / fPrime;
-            alphaPrime -= delta;
-            
-            if (std::abs(delta) < tolerance)
-                break;
-        }
-        
-        // 4. 璁＄畻瀹為檯涓績璺?a'
-        centerDistance = a * std::cos(phi) / std::cos(alphaPrime);
-        
-        // 5. 璁＄畻涓績璺濆彉鍔ㄧ郴鏁?y
-        double y = (centerDistance - a) / m;
-        
-        // 6. 璁＄畻榻块《楂樺彉鍔ㄧ郴鏁?y_delt
-        y_delt = x_sig - y;
-        
-        qDebug() << "绗竴涓娇杞彉浣嶅弬鏁? x_sig =" << x_sig 
-                 << ", y =" << y 
-                 << ", y_delt =" << y_delt;
-        qDebug() << "alphaPrime =" << (alphaPrime * 180.0 / M_PI) << " deg";
-        qDebug() << "瀹為檯涓績璺?a' =" << centerDistance;
-    }
+	TopoDS_Wire GeoCommandCreateGear::buildGearProfileWire(int Z, int Zmate,
+	                                                       double xOwn, double xSum,
+	                                                       double tipReliefAmount,
+	                                                       double tipReliefLength,
+	                                                       const gp_Pnt& center)
+	{
+		// Generic gear profile wire builder (parameterized version of original gear-1 path).
+		// Z      : own gear tooth count
+		// Zmate  : mating gear tooth count (used in working center distance)
+		// xOwn   : this gear's profile shift coefficient
+		// xSum   : x1 + x2 (shared between both gears)
+		// tipReliefAmount, tipReliefLength : own gear's parabolic tip relief
+		// center : final placement of the wire (origin for gear 1, (0, a', 0) for gear 2)
+		const double m   = _module;
+		const double phi = _pressureAngle * M_PI / 180.0;
+		const int    Z2  = Zmate;            // alias: legacy expressions reference Z2
+		const double x1  = xOwn;             // alias
+		const double x2  = xSum - xOwn;      // alias (x1 + x2 == xSum)
 
-    // 鍚勫渾鍗婂緞璁＄畻锛堝尯鍒嗗彉浣嶅拰闈炲彉浣嶆儏鍐碉級
-    double Rref = Z * m / 2.0; // 鍒嗗害鍦嗗崐寰?
-    
-    // 瀵逛簬鍙樹綅榻胯疆锛岄娇椤堕珮闇€瑕佸噺鍘婚娇椤堕珮鍙樺姩绯绘暟
-    double ha = _addendumCoeff * m;
-    if (x1 + x2 != 0)
-    {
-        ha = (_addendumCoeff + x1 - y_delt) * m; // 榻?鐨勯娇椤堕珮
-    }
-    
-    double Rb = Rref * std::cos(phi); // 鍩哄渾鍗婂緞
-    double Ra = Rref + ha;            // 榻块《鍦嗗崐寰?
-    
-    // 榻挎牴楂樿绠?
-    double hf = _dedendumCoeff * m;
-    if (x1 + x2 != 0)
-    {
-        hf = (_dedendumCoeff - x1) * m; // 榻?鐨勯娇鏍归珮
-    }
-    
-    double Rf = Rref - hf; // 榻挎牴鍦嗗崐寰?
+		double centerDistance;
+		double y_delt = 0.0;
+		double alphaPrime = phi;
 
-    // 纭繚榻挎牴鍦嗕笉灏忎簬涓€涓悎鐞嗗€?
-    if (Rf < 0)
-        Rf = 0.1 * m;
+		if (xSum == 0.0) {
+			centerDistance = (Z + Z2) * m / 2.0;
+		} else {
+			const double a            = (Z + Z2) * m / 2.0;
+			const double x_sig        = xSum;
+			const double invAlpha     = std::tan(phi) - phi;
+			const double invAlphaPrime = invAlpha + 2 * x_sig * std::tan(phi) / (Z + Z2);
 
-    // 瑙掑害璁＄畻
-    double angularPitch = 2.0 * M_PI / Z; // 榻胯窛瑙?
-    
-    // 榻垮帤鍗婅 (鍦ㄥ垎搴﹀渾涓?
-    // 瀵逛簬鍙樹綅榻胯疆锛岄娇鍘氫細鍙樺寲
-    double toothThicknessHalfAngle;
-    if (x1 + x2 == 0)
-    {
-        toothThicknessHalfAngle = angularPitch / 4.0;
-    }
-    else
-    {
-        // 鍙樹綅榻胯疆鐨勯娇鍘氬崐瑙掞細s = m(蟺/2 + 2x tan蠁)
-        double s = m * (M_PI / 2.0 + 2 * x1 * std::tan(phi));
-        toothThicknessHalfAngle = s / (2.0 * Rref);
-    }
-
-    // 娓愬紑绾垮弬鏁拌寖鍥?
-    double thetaStart = 0.0;
-    if (Rf > Rb)
-    {
-        // 榻挎牴鍦嗗湪鍩哄渾澶栵紝娓愬紑绾夸粠榻挎牴鍦嗗紑濮?
-        thetaStart = std::sqrt((Rf * Rf - Rb * Rb)) / Rb;
-    }
-    double thetaEnd = std::sqrt((Ra * Ra - Rb * Rb)) / Rb;
-
-    // 鐢熸垚鍗曚釜榻跨殑娓愬紑绾跨偣
-    const int numPoints = 20;
-    std::vector<gp_Pnt> involuteLeft;
-    std::vector<gp_Pnt> involuteRight;
-
-    // 淇瀷璧风偣鍗婂緞锛堜粠榻块《鍚戜笅 _tipReliefLength 璺濈锛?
-    double R_relief_start = Ra - _tipReliefLength;
-
-    // ===== 璋冭瘯杈撳嚭锛氶娇杞弬鏁?=====
-    qDebug() << "========== 绗竴涓娇杞弬鏁?==========";
-    qDebug() << "榻挎暟 Z =" << Z;
-    qDebug() << "鍙樹綅绯绘暟 x1 =" << x1;
-    qDebug() << "榻块《鍦嗗崐寰?Ra =" << Ra << "mm";
-    qDebug() << "榻挎牴鍦嗗崐寰?Rf =" << Rf << "mm";
-    qDebug() << "鍩哄渾鍗婂緞 Rb =" << Rb << "mm";
-    qDebug() << "鍒嗗害鍦嗗崐寰?Rref =" << Rref << "mm";
-    qDebug() << "toothThicknessHalfAngle =" << (toothThicknessHalfAngle * 180.0 / M_PI) << " deg";
-    qDebug() << "娓愬紑绾垮弬鏁拌寖鍥? thetaStart =" << thetaStart 
-             << ", thetaEnd =" << thetaEnd;
-    qDebug() << "===================================";
-
-    // ===== 璋冭瘯杈撳嚭锛氫慨鍨嬪弬鏁?=====
-    qDebug() << "========== 榻胯疆淇瀷鍙傛暟 ==========";
-    qDebug() << "榻块《鍦嗗崐寰?Ra =" << Ra << "mm";
-    qDebug() << "鍩哄渾鍗婂緞 Rb =" << Rb << "mm";
-    qDebug() << "淇瀷閲?Ca =" << _tipReliefAmount << "mm";
-    qDebug() << "淇瀷闀垮害 Lca =" << _tipReliefLength << "mm";
-    qDebug() << "淇瀷璧风偣鍗婂緞 R_start =" << R_relief_start << "mm";
-    qDebug() << "===================================";
-
-		int reliefPointCount = 0; // 缁熻琚慨鍨嬬殑鐐规暟
-
-		for(int i = 0; i <= numPoints; ++i) {
-			double t		 = (double)i / numPoints;
-			double theta	 = thetaStart + t * (thetaEnd - thetaStart);
-			gp_Pnt pt		 = involutePoint(Rb, theta);
-
-			// 璁＄畻褰撳墠鐐圭殑鍗婂緞
-			double R_current = std::sqrt(pt.X() * pt.X() + pt.Y() * pt.Y());
-
-			// ===== 鎶涚墿绾夸慨鍨?=====
-			// 濡傛灉鍚敤淇瀷涓斿綋鍓嶇偣鍦ㄤ慨鍨嬪尯鍩熷唴
-			if(_tipReliefAmount > 0 && _tipReliefLength > 0 && R_current > R_relief_start) {
-				// 鍒颁慨鍨嬭捣鐐圭殑璺濈
-				double y	   = R_current - R_relief_start;
-				// 鎶涚墿绾夸慨鍨嬮噺: 未 = Ca * (y/Lca)虏
-				double delta   = _tipReliefAmount * (y / _tipReliefLength) * (y / _tipReliefLength);
-
-				// 璁＄畻璇ョ偣鐨勫帇鍔涜
-				double alpha_y = std::acos(Rb / R_current);
-
-				// 绠€鍖栧鐞嗭細娌垮緞鍚戝悜鍐呭亸绉?
-				double nx	   = pt.X() / R_current; // 寰勫悜鍗曚綅鍚戦噺
-				double ny	   = pt.Y() / R_current;
-
-				// 璋冭瘯杈撳嚭锛氭瘡涓淇瀷鐨勭偣
-				if(reliefPointCount < 5) { // 鍙緭鍑哄墠5涓偣閬垮厤鍒峰睆
-                    qDebug() << "point" << i << ": R=" << R_current << "mm, y=" << y
-							 << "mm, delta=" << delta << "mm";
-					qDebug() << "  鍘熷潗鏍?(" << pt.X() << "," << pt.Y() << ")";
-				}
-
-				// 鍚戝唴鍋忕Щ delta 璺濈
-				pt.SetX(pt.X() - delta * nx);
-				pt.SetY(pt.Y() - delta * ny);
-
-				if(reliefPointCount < 5) {
-					qDebug() << "  淇瀷鍚?(" << pt.X() << "," << pt.Y() << ")";
-				}
-
-				reliefPointCount++;
+			alphaPrime = phi;
+			const double tolerance = 1e-10;
+			const int    maxIterations = 100;
+			for (int i = 0; i < maxIterations; ++i) {
+				const double f      = std::tan(alphaPrime) - alphaPrime - invAlphaPrime;
+				const double fPrime = 1.0 / (std::cos(alphaPrime) * std::cos(alphaPrime)) - 1.0;
+				const double delta  = f / fPrime;
+				alphaPrime -= delta;
+				if (std::abs(delta) < tolerance) break;
 			}
 
-			// 璁＄畻娓愬紑绾垮湪鍒嗗害鍦嗗鐨勮搴﹀亸绉?
-			double angleAtRef = involuteAngle(Rb, Rref);
+			centerDistance = a * std::cos(phi) / std::cos(alphaPrime);
+			const double y = (centerDistance - a) / m;
+			y_delt = x_sig - y;
+		}
+		(void)centerDistance;  // not used directly inside helper (gear 2 wrapper computes its own)
+		(void)alphaPrime;
 
-			// 鏃嬭浆浣块娇瀵圭О浜嶺杞?
-			gp_Pnt ptRotated  = rotatePoint(pt, -angleAtRef - toothThicknessHalfAngle);
-			involuteLeft.push_back(ptRotated);
+		const double Rref = Z * m / 2.0;
+		double ha = _addendumCoeff * m;
+		if (xSum != 0.0) ha = (_addendumCoeff + x1 - y_delt) * m;
+		const double Rb = Rref * std::cos(phi);
+		const double Ra = Rref + ha;
 
-			// 闀滃儚寰楀埌鍙︿竴渚ф笎寮€绾?
-			involuteRight.push_back(mirrorPoint(ptRotated));
+		double hf = _dedendumCoeff * m;
+		if (xSum != 0.0) hf = (_dedendumCoeff - x1) * m;
+		double Rf = Rref - hf;
+		if (Rf < 0) Rf = 0.1 * m;
+
+		const double angularPitch = 2.0 * M_PI / Z;
+		double toothThicknessHalfAngle;
+		if (xSum == 0.0) {
+			toothThicknessHalfAngle = angularPitch / 4.0;
+		} else {
+			const double s = m * (M_PI / 2.0 + 2 * x1 * std::tan(phi));
+			toothThicknessHalfAngle = s / (2.0 * Rref);
 		}
 
-		// 璋冭瘯杈撳嚭锛氫慨鍨嬬粺璁?
-		qDebug() << "淇瀷鐐规暟:" << reliefPointCount << "/" << (numPoints + 1);
-		if(reliefPointCount == 0 && _tipReliefAmount > 0) {
-            qDebug() << "Warning: no relief points were modified.";
+		double thetaStart = 0.0;
+		if (Rf > Rb) thetaStart = std::sqrt(Rf * Rf - Rb * Rb) / Rb;
+		const double thetaEnd = std::sqrt(Ra * Ra - Rb * Rb) / Rb;
+
+		const int numPoints = 50;  
+		std::vector<gp_Pnt> involuteLeft;
+		std::vector<gp_Pnt> involuteRight;
+		involuteLeft.reserve(numPoints + 1);
+		involuteRight.reserve(numPoints + 1);
+
+		const double R_relief_start = Ra - tipReliefLength;
+
+		for (int i = 0; i <= numPoints; ++i) {
+			const double t     = (double)i / numPoints;
+			const double theta = thetaStart + t * (thetaEnd - thetaStart);
+			gp_Pnt pt          = involutePoint(Rb, theta);
+
+			const double R_current = std::sqrt(pt.X() * pt.X() + pt.Y() * pt.Y());
+
+			// Parabolic tip relief: shift inward by Ca * (y/Lca)^2 along the radial direction.
+			if (tipReliefAmount > 0.0 && tipReliefLength > 0.0 && R_current > R_relief_start) {
+				const double yRel  = R_current - R_relief_start;
+				const double delta = tipReliefAmount * (yRel / tipReliefLength) * (yRel / tipReliefLength);
+				const double nx    = pt.X() / R_current;
+				const double ny    = pt.Y() / R_current;
+				pt.SetX(pt.X() - delta * nx);
+				pt.SetY(pt.Y() - delta * ny);
+			}
+
+			const double angleAtRef = involuteAngle(Rb, Rref);
+			gp_Pnt ptRotated = rotatePoint(pt, -angleAtRef - toothThicknessHalfAngle);
+			involuteLeft.push_back(ptRotated);
+			involuteRight.push_back(mirrorPoint(ptRotated));
 		}
 
 		BRepBuilderAPI_MakeWire wireBuilder;
 
-		// 涓烘瘡涓娇鍒涘缓杞粨
-		for(int tooth = 0; tooth < Z; ++tooth) {
-			double toothAngle = tooth * angularPitch;
+		for (int tooth = 0; tooth < Z; ++tooth) {
+			const double toothAngle = tooth * angularPitch;
 
-			// 娓愬紑绾垮乏渚?(浠庨娇鏍瑰埌榻块《)
-			for(size_t i = 0; i < involuteLeft.size() - 1; ++i) {
+			// Left flank: root -> tip
+			for (size_t i = 0; i + 1 < involuteLeft.size(); ++i) {
 				gp_Pnt p1 = rotatePoint(involuteLeft[i], toothAngle);
 				gp_Pnt p2 = rotatePoint(involuteLeft[i + 1], toothAngle);
-				if(p1.Distance(p2) > 1e-6) {
-					TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(p1, p2);
-					wireBuilder.Add(edge);
-				}
+				if (p1.Distance(p2) > 1e-6)
+					wireBuilder.Add(BRepBuilderAPI_MakeEdge(p1, p2));
 			}
 
-			// 榻块《鍦嗗姬
-			gp_Pnt tipLeft	= rotatePoint(involuteLeft.back(), toothAngle);
+			// Tip arc through tipLeft, tipMid (on Ra circle), tipRight.
+			gp_Pnt tipLeft  = rotatePoint(involuteLeft.back(),  toothAngle);
 			gp_Pnt tipRight = rotatePoint(involuteRight.back(), toothAngle);
-
-			if(tipLeft.Distance(tipRight) > 1e-6) {
-				// 浣跨敤鍦嗗姬杩炴帴榻块《
+			if (tipLeft.Distance(tipRight) > 1e-6) {
 				gp_Pnt tipMid((tipLeft.X() + tipRight.X()) / 2.0 * Ra
-								  / std::sqrt(std::pow((tipLeft.X() + tipRight.X()) / 2.0, 2)
-											  + std::pow((tipLeft.Y() + tipRight.Y()) / 2.0, 2)),
-							  (tipLeft.Y() + tipRight.Y()) / 2.0 * Ra
-								  / std::sqrt(std::pow((tipLeft.X() + tipRight.X()) / 2.0, 2)
-											  + std::pow((tipLeft.Y() + tipRight.Y()) / 2.0, 2)),
-							  0);
+				                  / std::sqrt(std::pow((tipLeft.X() + tipRight.X()) / 2.0, 2)
+				                              + std::pow((tipLeft.Y() + tipRight.Y()) / 2.0, 2)),
+				              (tipLeft.Y() + tipRight.Y()) / 2.0 * Ra
+				                  / std::sqrt(std::pow((tipLeft.X() + tipRight.X()) / 2.0, 2)
+				                              + std::pow((tipLeft.Y() + tipRight.Y()) / 2.0, 2)),
+				              0);
 				try {
 					GC_MakeArcOfCircle arcMaker(tipLeft, tipMid, tipRight);
-					if(arcMaker.IsDone()) {
-						TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker.Value());
-						wireBuilder.Add(arcEdge);
-					} else {
-						// 濡傛灉鍦嗗姬澶辫触锛屼娇鐢ㄧ洿绾?
-						TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(tipLeft, tipRight);
-						wireBuilder.Add(edge);
-					}
-				} catch(...) {
-					TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(tipLeft, tipRight);
-					wireBuilder.Add(edge);
+					if (arcMaker.IsDone())
+						wireBuilder.Add(BRepBuilderAPI_MakeEdge(arcMaker.Value()));
+					else
+						wireBuilder.Add(BRepBuilderAPI_MakeEdge(tipLeft, tipRight));
+				} catch (...) {
+					wireBuilder.Add(BRepBuilderAPI_MakeEdge(tipLeft, tipRight));
 				}
 			}
 
-			// 娓愬紑绾垮彸渚?(浠庨娇椤跺埌榻挎牴)
-			for(int i = (int)involuteRight.size() - 1; i > 0; --i) {
+			// Right flank: tip -> root
+			for (int i = (int)involuteRight.size() - 1; i > 0; --i) {
 				gp_Pnt p1 = rotatePoint(involuteRight[i], toothAngle);
 				gp_Pnt p2 = rotatePoint(involuteRight[i - 1], toothAngle);
-				if(p1.Distance(p2) > 1e-6) {
-					TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(p1, p2);
-					wireBuilder.Add(edge);
-				}
+				if (p1.Distance(p2) > 1e-6)
+					wireBuilder.Add(BRepBuilderAPI_MakeEdge(p1, p2));
 			}
 
-			// 榻挎牴鍦嗗姬 (杩炴帴鍒颁笅涓€涓娇)
-			gp_Pnt rootRight	= rotatePoint(involuteRight.front(), toothAngle);
-			gp_Pnt nextRootLeft = rotatePoint(involuteLeft.front(), toothAngle + angularPitch);
-
-			if(rootRight.Distance(nextRootLeft) > 1e-6) {
-				// 璁＄畻榻挎牴鍦嗗姬鐨勮捣濮嬪拰缁撴潫瑙掑害
-				double rootRightAngle	 = std::atan2(rootRight.Y(), rootRight.X());
+			// Root arc bridging current right-root to next-tooth left-root.
+			gp_Pnt rootRight    = rotatePoint(involuteRight.front(), toothAngle);
+			gp_Pnt nextRootLeft = rotatePoint(involuteLeft.front(),  toothAngle + angularPitch);
+			if (rootRight.Distance(nextRootLeft) > 1e-6) {
+				double rootRightAngle    = std::atan2(rootRight.Y(),    rootRight.X());
 				double nextRootLeftAngle = std::atan2(nextRootLeft.Y(), nextRootLeft.X());
-				qDebug() << " 绗竴涓娇杞?cya 0312 ========== 榻挎牴鐐硅皟璇曚俊鎭?==========";
-qDebug() << "toothAngle:" << toothAngle << "rad (" << toothAngle * 180/M_PI << "掳)";
-qDebug() << "angularPitch:" << angularPitch << "rad (" << angularPitch * 180/M_PI << "掳)";
-qDebug() << "next tooth angle:" << toothAngle + angularPitch << "rad (" 
-         << (toothAngle + angularPitch) * 180/M_PI << "掳)";
+				if (nextRootLeftAngle < rootRightAngle) nextRootLeftAngle += 2.0 * M_PI;
+				const double rootArcSpan = nextRootLeftAngle - rootRightAngle;
 
-qDebug() << "\n--- 褰撳墠榻垮彸渚ф笎寮€绾胯捣鐐?---";
-qDebug() << "鍘熷鐐?(involuteRight.front()):";
-qDebug() << "  X:" << involuteRight.front().X();
-qDebug() << "  Y:" << involuteRight.front().Y();
-qDebug() << "  Z:" << involuteRight.front().Z();
-
-				// 纭繚瑙掑害杩炵画锛堝鐞嗚法瓒?搴︾殑鎯呭喌锛?
-				if(nextRootLeftAngle < rootRightAngle) {
-					nextRootLeftAngle += 2.0 * M_PI;
-					qDebug() << "cya 0312璋冩暣鍚巒extRootLeft瑙掑害:" << nextRootLeftAngle * 180/M_PI << "掳";
-				}
-
-				// 璁＄畻榻挎牴鍦嗗姬鐨勮搴﹁法搴?
-				double rootArcSpan = nextRootLeftAngle - rootRightAngle;
-                qDebug() << "cya 0312 root arc span:" << rootArcSpan;
-				// 濡傛灉鍦嗗姬瑙掑害瓒呰繃180搴︼紝闄愬埗涓?80搴?
-				if(rootArcSpan > M_PI) {
-                    qDebug() << "root arc span > 180 deg, using 180 deg arc";
-					// 璁＄畻180搴﹀渾寮х殑缁堢偣瑙掑害
-					double limitedEndAngle = rootRightAngle + M_PI;
-					// 鍦嗗姬涓偣锛堟伆濂藉湪璧风偣鍋忕Щ90搴﹀锛?
-					double rootMidAngle	   = rootRightAngle + M_PI / 2.0;
+				if (rootArcSpan > M_PI) {
+					// > 180 degrees: cap at 180 deg arc and bridge the rest with a line.
+					const double limitedEndAngle = rootRightAngle + M_PI;
+					const double rootMidAngle    = rootRightAngle + M_PI / 2.0;
 					gp_Pnt rootMid(Rf * std::cos(rootMidAngle), Rf * std::sin(rootMidAngle), 0);
-					// 180搴﹀渾寮х殑缁堢偣
-					gp_Pnt arcEnd(Rf * std::cos(limitedEndAngle), Rf * std::sin(limitedEndAngle),
-								  0);
-
+					gp_Pnt arcEnd(Rf * std::cos(limitedEndAngle), Rf * std::sin(limitedEndAngle), 0);
 					try {
-						// 鍒涘缓180搴﹀渾寮?
 						GC_MakeArcOfCircle arcMaker(rootRight, rootMid, arcEnd);
-						if(arcMaker.IsDone()) {
+						if (arcMaker.IsDone())
 							wireBuilder.Add(BRepBuilderAPI_MakeEdge(arcMaker.Value()));
-						}
-					} catch(...) {
-					}
-
-					// 鐢ㄧ洿绾胯繛鎺ュ墿浣欓儴鍒嗭紙浠庡渾寮х粓鐐瑰埌涓嬩竴涓娇鐨勬笎寮€绾胯捣鐐癸級
-					if(arcEnd.Distance(nextRootLeft) > 1e-6) {
-						TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(arcEnd, nextRootLeft);
-						wireBuilder.Add(edge);
-					}
+					} catch (...) {}
+					if (arcEnd.Distance(nextRootLeft) > 1e-6)
+						wireBuilder.Add(BRepBuilderAPI_MakeEdge(arcEnd, nextRootLeft));
 				} else {
-					qDebug() <<"榻挎牴鍦嗗皬浜?80";
-					// 瑙掑害璺ㄥ害杩囧皬鍒欑敤鐩寸嚎锛岄伩鍏?GC_MakeArcOfCircle 鎶涘嚭 StdFail_NotDone
 					const double minRootArcSpan = 1e-6;
-					if(rootArcSpan < minRootArcSpan) {
-						TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
-						wireBuilder.Add(edge);
-                        qDebug() << "root arc span too small, using line segment";
+					if (rootArcSpan < minRootArcSpan) {
+						wireBuilder.Add(BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft));
 					} else {
-					// 鍦嗗姬瑙掑害涓嶈秴杩?80搴︼紝姝ｅ父澶勭悊
-					double rootMidAngle = (rootRightAngle + nextRootLeftAngle) / 2.0;
-					gp_Pnt rootMid(Rf * std::cos(rootMidAngle), Rf * std::sin(rootMidAngle), 0);
-					qDebug() << "涓偣瑙掑害:" << rootMidAngle * 180/M_PI << "掳";
-					qDebug() << "涓偣鍧愭爣: (" << rootMid.X() << "," << rootMid.Y() << ")";
-					// 楠岃瘉涓夌偣鏄惁鍏辩嚎
-					double det = rootRight.X() * (rootMid.Y() - nextRootLeft.Y()) +
-					rootMid.X() * (nextRootLeft.Y() - rootRight.Y()) +
-					nextRootLeft.X() * (rootRight.Y() - rootMid.Y());
-	   qDebug() << "涓夌偣鍏辩嚎妫€娴?(det):" << det;
-	   if(qAbs(det) < 1e-10) {
-           qDebug() << "Warning: three points are nearly collinear.";
-	   }
-	   // 褰撲笁鐐规帴杩戝叡绾?|det|杈冨皬)鏃讹紝涓夌偣娉曚細寰楀埌閫€鍖栧姬(鏄剧ず涓虹洿绾?锛屾敼鐢ㄥ渾蹇冩硶淇濊瘉榻挎牴涓哄渾寮?
-	   const double detThreshold = 0.1;
-	   bool useCircleMethod = (qAbs(det) < detThreshold);
-	   if(useCircleMethod) {
-		   qDebug() << "det 杩囧皬锛屾敼鐢ㄥ渾蹇冩硶鍒涘缓榻挎牴鍦嗗姬";
-	   }
-	   try {
-		if(useCircleMethod) {
-			// 鍦嗗績娉曪細鍦ㄩ娇鏍瑰渾涓婃寜瑙掑害鍒涘缓鍦嗗姬锛屾暟鍊肩ǔ瀹?
-			gp_Circ circle(gp_Ax2(gp_Pnt(0,0,0), gp_Dir(0,0,1)), Rf);
-			GC_MakeArcOfCircle arcMaker2(circle, rootRightAngle, nextRootLeftAngle, true);
-			if(arcMaker2.IsDone()) {
-				TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker2.Value());
-				wireBuilder.Add(arcEdge);
-                qDebug() << "circle-center method created root arc successfully";
-			} else {
-				TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
-				wireBuilder.Add(edge);
-				qDebug() << "鍦嗗績娉曞け璐ワ紝浣跨敤鐩寸嚎鏇夸唬";
-			}
-		} else {
-			GC_MakeArcOfCircle arcMaker(rootRight, rootMid, nextRootLeft);
-			if(arcMaker.IsDone()) {
-                qDebug() << "arc created successfully";
-				TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker.Value());
-				wireBuilder.Add(arcEdge);
-			} else {
-				qDebug() << "鍦嗗姬鍒涘缓澶辫触锛屼娇鐢ㄥ渾蹇冩硶";
-				gp_Circ circle(gp_Ax2(gp_Pnt(0,0,0), gp_Dir(0,0,1)), Rf);
-				GC_MakeArcOfCircle arcMaker2(circle, rootRightAngle, nextRootLeftAngle, true);
-				if(arcMaker2.IsDone()) {
-					TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker2.Value());
-					wireBuilder.Add(arcEdge);
-                    qDebug() << "circle-center method created arc successfully";
-				} else {
-					TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
-					wireBuilder.Add(edge);
-					qDebug() << "浣跨敤鐩寸嚎鏇夸唬";
-				}
-			}
-		}
-	   } catch(...) {
-		qDebug() << "寮傚父锛屼娇鐢ㄥ渾蹇冩硶鍒涘缓鍦嗗姬";
-		try {
-			gp_Circ circle(gp_Ax2(gp_Pnt(0,0,0), gp_Dir(0,0,1)), Rf);
-			GC_MakeArcOfCircle arcMaker2(circle, rootRightAngle, nextRootLeftAngle, true);
-			if(arcMaker2.IsDone()) {
-				TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker2.Value());
-				wireBuilder.Add(arcEdge);
-			} else {
-				TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
-				wireBuilder.Add(edge);
-			}
-		} catch(...) {
-			TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
-			wireBuilder.Add(edge);
-		}
-	   }
-					} // rootArcSpan >= minRootArcSpan
+						const double rootMidAngle = (rootRightAngle + nextRootLeftAngle) / 2.0;
+						gp_Pnt rootMid(Rf * std::cos(rootMidAngle), Rf * std::sin(rootMidAngle), 0);
+						const double det = rootRight.X() * (rootMid.Y() - nextRootLeft.Y()) +
+						                   rootMid.X() * (nextRootLeft.Y() - rootRight.Y()) +
+						                   nextRootLeft.X() * (rootRight.Y() - rootMid.Y());
+						const bool useCircleMethod = (qAbs(det) < 0.1);
+						bool added = false;
+						try {
+							if (useCircleMethod) {
+								gp_Circ circle(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), Rf);
+								GC_MakeArcOfCircle arcMaker(circle, rootRightAngle, nextRootLeftAngle, true);
+								if (arcMaker.IsDone()) {
+									wireBuilder.Add(BRepBuilderAPI_MakeEdge(arcMaker.Value()));
+									added = true;
+								}
+							} else {
+								GC_MakeArcOfCircle arcMaker(rootRight, rootMid, nextRootLeft);
+								if (arcMaker.IsDone()) {
+									wireBuilder.Add(BRepBuilderAPI_MakeEdge(arcMaker.Value()));
+									added = true;
+								} else {
+									gp_Circ circle(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), Rf);
+									GC_MakeArcOfCircle arcMaker2(circle, rootRightAngle, nextRootLeftAngle, true);
+									if (arcMaker2.IsDone()) {
+										wireBuilder.Add(BRepBuilderAPI_MakeEdge(arcMaker2.Value()));
+										added = true;
+									}
+								}
+							}
+						} catch (...) {}
+						if (!added) {
+							try {
+								gp_Circ circle(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), Rf);
+								GC_MakeArcOfCircle arcMaker(circle, rootRightAngle, nextRootLeftAngle, true);
+								if (arcMaker.IsDone())
+									wireBuilder.Add(BRepBuilderAPI_MakeEdge(arcMaker.Value()));
+								else
+									wireBuilder.Add(BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft));
+							} catch (...) {
+								wireBuilder.Add(BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft));
+							}
+						}
+					}
 				}
 			}
 		}
 
-		if(!wireBuilder.IsDone()) {
-			qDebug() << "绗竴涓娇杞?Wire 鏋勫缓鏈畬鎴?(IsDone 涓?false)";
+		if (!wireBuilder.IsDone()) {
+			qWarning() << "buildGearProfileWire: wire not done, Z =" << Z;
 			return TopoDS_Wire();
 		}
+
+		TopoDS_Wire wire;
 		try {
-			return wireBuilder.Wire();
-		} catch(Standard_Failure& e) {
-			qDebug() << "绗竴涓娇杞?Wire() 寮傚父:" << e.GetMessageString();
+			wire = wireBuilder.Wire();
+		} catch (Standard_Failure& e) {
+			qWarning() << "buildGearProfileWire: wire exception:" << e.GetMessageString();
 			return TopoDS_Wire();
 		}
+
+		if (center.X() != 0.0 || center.Y() != 0.0 || center.Z() != 0.0) {
+			gp_Trsf trsf;
+			trsf.SetTranslation(gp_Vec(center.X(), center.Y(), center.Z()));
+			BRepBuilderAPI_Transform tf(wire, trsf);
+			wire = TopoDS::Wire(tf.Shape());
+		}
+		return wire;
 	}
 
 	TopoDS_Wire GeoCommandCreateGear::createSecondGearProfile()
 	{
-		// 榻胯疆鍩烘湰鍙傛暟璁＄畻
-		double m	= _module;
-		int	   Z	= _numberOfSecondTeeth;
-		double Z1   = _numberOfTeeth;
-		double phi	= _pressureAngle * M_PI / 180.0; // 杞崲涓哄姬搴?
-		double centerDistance;
-
-		double x1 = _x1;
-		double x2 = _x2;
-		double _y_delt;
-		qDebug()<<"鍙樹綅绯绘暟"<<x1<<","<<x2;
-		if (x1 + x2 == 0)
-		{
-            qDebug() << "No profile shift, using direct center distance calculation";
-			centerDistance = (Z1 + Z)*m/2;
-			
-		}
-		
-	  else
-	  {
-		qDebug() << "浣跨敤鍙樹綅璁＄畻涓績璺濆強鐩稿叧鍙傛暟";
-        
-        // 1. 璁＄畻鏈彉浣嶆椂鐨勪腑蹇冭窛
-        double a = (Z1 + Z) * m / 2;
-        
-        // 2. 璁＄畻鎬诲彉浣嶇郴鏁?
-        double x_sig = x1 + x2;
-        
-        // 3. 璁＄畻鍟悎瑙?伪'
-        // 鏍规嵁鍏紡锛歩nv伪' = inv伪 + 2 * (x1 + x2) * tan(蠁) / (Z1 + Z)
-        double invAlpha = std::tan(phi) - phi; // 娓愬紑绾垮嚱鏁?inv伪
-        double invAlphaPrime = invAlpha + 2 * x_sig * std::tan(phi) / (Z1 + Z);
-        
-        // 姹傝В鍟悎瑙?伪'锛堥渶瑕佽凯浠ｆ眰瑙ｏ紝杩欓噷浣跨敤鐗涢】娉曪級
-        double alphaPrime = phi; // 鍒濆鍊艰涓哄帇鍔涜
-        double tolerance = 1e-10;
-        int maxIterations = 100;
-        
-        for (int i = 0; i < maxIterations; i++)
-        {
-            double f = std::tan(alphaPrime) - alphaPrime - invAlphaPrime;
-            double fPrime = 1.0 / (std::cos(alphaPrime) * std::cos(alphaPrime)) - 1.0;
-            
-            double delta = f / fPrime;
-            alphaPrime -= delta;
-            
-            if (std::abs(delta) < tolerance)
-                break;
-        }
-        
-        // 4. 璁＄畻瀹為檯涓績璺?a'
-        centerDistance = a * std::cos(phi) / std::cos(alphaPrime);
-        
-        // 5. 璁＄畻涓績璺濆彉鍔ㄧ郴鏁?y
-        double y = (centerDistance - a) / m;
-        
-        // 6. 璁＄畻榻块《楂樺彉鍔ㄧ郴鏁?y_delt
-        double y_delt = x_sig - y;
-        
-        // 瀛樺偍璁＄畻寰楀埌鐨勫彉浣嶅弬鏁帮紙濡傛灉闇€瑕侊級
-        double _y = y;
-        _y_delt = y_delt;
-        double _alphaPrime = alphaPrime * 180.0 / M_PI; // 杞崲涓鸿搴?
-        
-        qDebug() << "鍙樹綅鍙傛暟: x_sig =" << x_sig << ", y =" << y << ", y_delt =" << y_delt;
-        qDebug() << "alphaPrime =" << _alphaPrime << " deg";
-        qDebug() << "瀹為檯涓績璺?a' =" << centerDistance;
-    }
-
-    // 鍚勫渾鍗婂緞璁＄畻锛堥渶瑕佸尯鍒嗗彉浣嶅拰闈炲彉浣嶆儏鍐碉級
-    double Rref = Z * m / 2.0; // 鍒嗗害鍦嗗崐寰?
-    
-    // 瀵逛簬鍙樹綅榻胯疆锛岄娇椤堕珮闇€瑕佸噺鍘婚娇椤堕珮鍙樺姩绯绘暟
-    double ha = _addendumCoeff * m;
-    if (x1 + x2 != 0)
-    {
-        qDebug() << "Using profile shift to calculate addendum";
-        ha = (_addendumCoeff + x2 - (_y_delt)) * m; // 榻?鐨勯娇椤堕珮
-    }
-    
-    double Rb = Rref * std::cos(phi); // 鍩哄渾鍗婂緞
-    double Ra = Rref + ha;            // 榻块《鍦嗗崐寰?
-    
-    // 榻挎牴楂樿绠?
-    double hf = _dedendumCoeff * m;
-    if (x1 + x2 != 0)
-    {
-        hf = (_dedendumCoeff - x2) * m; // 榻?鐨勯娇鏍归珮
-    }
-    
-    double Rf = Rref - hf; // 榻挎牴鍦嗗崐寰?
-
-    // 纭繚榻挎牴鍦嗕笉灏忎簬涓€涓悎鐞嗗€?
-    if (Rf < 0)
-        Rf = 0.1 * m;
-
-    // 瑙掑害璁＄畻
-    double angularPitch = 2.0 * M_PI / Z; // 榻胯窛瑙?
-    
-    // 榻垮帤鍗婅 (鍦ㄥ垎搴﹀渾涓?
-    // 瀵逛簬鍙樹綅榻胯疆锛岄娇鍘氫細鍙樺寲
-    double toothThicknessHalfAngle;
-    if (x1 + x2 == 0)
-    {
-        toothThicknessHalfAngle = angularPitch / 4.0;
-    }
-    else
-    {
-        // 鍙樹綅榻胯疆鐨勯娇鍘氬崐瑙掞細s = m(蟺/2 + 2x tan蠁)
-        double s = m * (M_PI / 2.0 + 2 * x2 * std::tan(phi));
-        toothThicknessHalfAngle = s / (2.0 * Rref);
-    }
-
-    // 娓愬紑绾垮弬鏁拌寖鍥?
-    double thetaStart = 0.0;
-    if (Rf > Rb)
-    {
-        // 榻挎牴鍦嗗湪鍩哄渾澶栵紝娓愬紑绾夸粠榻挎牴鍦嗗紑濮?
-        thetaStart = std::sqrt((Rf * Rf - Rb * Rb)) / Rb;
-    }
-    double thetaEnd = std::sqrt((Ra * Ra - Rb * Rb)) / Rb;
-
-		// 鐢熸垚鍗曚釜榻跨殑娓愬紑绾跨偣
-		const int			numPoints = 20;
-		std::vector<gp_Pnt> involuteLeft;
-		std::vector<gp_Pnt> involuteRight;
-
-		// 淇瀷璧风偣鍗婂緞锛堜粠榻块《鍚戜笅 _tipReliefLength2 璺濈锛?
-		double				R_relief_start = Ra - _tipReliefLength2;
-
-		// ===== 璋冭瘯杈撳嚭锛氫慨鍨嬪弬鏁?=====
-		qDebug() << "========== 绗簩涓娇杞慨鍨嬪弬鏁?==========";
-		qDebug() << "榻块《鍦嗗崐寰?Ra =" << Ra << "mm";
-		qDebug() << "鍩哄渾鍗婂緞 Rb =" << Rb << "mm";
-		qDebug() << "淇瀷閲?Ca =" << _tipReliefAmount2 << "mm";
-		qDebug() << "淇瀷闀垮害 Lca =" << _tipReliefLength2 << "mm";
-		qDebug() << "淇瀷璧风偣鍗婂緞 R_start =" << R_relief_start << "mm";
-		qDebug() << "涓績璺?a =" << centerDistance << "mm";
-		qDebug() << "===================================";
-
-		int reliefPointCount = 0; // 缁熻琚慨鍨嬬殑鐐规暟
-
-		for(int i = 0; i <= numPoints; ++i) {
-			double t		 = (double)i / numPoints;
-			double theta	 = thetaStart + t * (thetaEnd - thetaStart);
-			gp_Pnt pt		 = involutePoint(Rb, theta);
-
-			// 璁＄畻褰撳墠鐐圭殑鍗婂緞
-			double R_current = std::sqrt(pt.X() * pt.X() + pt.Y() * pt.Y());
-
-			// ===== 鎶涚墿绾夸慨鍨?=====
-			// 濡傛灉鍚敤淇瀷涓斿綋鍓嶇偣鍦ㄤ慨鍨嬪尯鍩熷唴
-			if(_tipReliefAmount2 > 0 && _tipReliefLength2 > 0 && R_current > R_relief_start) {
-				// 鍒颁慨鍨嬭捣鐐圭殑璺濈
-				double y	   = R_current - R_relief_start;
-				// 鎶涚墿绾夸慨鍨嬮噺: 未 = Ca * (y/Lca)虏
-				double delta   = _tipReliefAmount2 * (y / _tipReliefLength2) * (y / _tipReliefLength2);
-
-				// 璁＄畻璇ョ偣鐨勫帇鍔涜
-				double alpha_y = std::acos(Rb / R_current);
-
-				// 绠€鍖栧鐞嗭細娌垮緞鍚戝悜鍐呭亸绉?
-				double nx	   = pt.X() / R_current; // 寰勫悜鍗曚綅鍚戦噺
-				double ny	   = pt.Y() / R_current;
-
-				// 璋冭瘯杈撳嚭锛氭瘡涓淇瀷鐨勭偣
-				if(reliefPointCount < 5) { // 鍙緭鍑哄墠5涓偣閬垮厤鍒峰睆
-                    qDebug() << "point" << i << ": R=" << R_current << "mm, y=" << y
-							 << "mm, delta=" << delta << "mm";
-					qDebug() << "  鍘熷潗鏍?(" << pt.X() << "," << pt.Y() << ")";
-				}
-
-				// 鍚戝唴鍋忕Щ delta 璺濈
-				pt.SetX(pt.X() - delta * nx);
-				pt.SetY(pt.Y() - delta * ny);
-
-				if(reliefPointCount < 5) {
-					qDebug() << "  淇瀷鍚?(" << pt.X() << "," << pt.Y() << ")";
-				}
-
-				reliefPointCount++;
-			}
-
-			// 璁＄畻娓愬紑绾垮湪鍒嗗害鍦嗗鐨勮搴﹀亸绉?
-			double angleAtRef = involuteAngle(Rb, Rref);
-
-			// 鏃嬭浆浣块娇瀵圭О浜嶺杞?
-			gp_Pnt ptRotated  = rotatePoint(pt, -angleAtRef - toothThicknessHalfAngle);
-			involuteLeft.push_back(ptRotated);
-
-			// 闀滃儚寰楀埌鍙︿竴渚ф笎寮€绾?
-			involuteRight.push_back(mirrorPoint(ptRotated));
-		}
-
-		// 璋冭瘯杈撳嚭锛氫慨鍨嬬粺璁?
-		qDebug() << "淇瀷鐐规暟:" << reliefPointCount << "/" << (numPoints + 1);
-		if(reliefPointCount == 0 && _tipReliefAmount2 > 0) {
-            qDebug() << "Warning: no relief points were modified.";
-		}
-
-		BRepBuilderAPI_MakeWire wireBuilder;
-
-		// 涓烘瘡涓娇鍒涘缓杞粨锛堝厛鍦?(0,0,0) 鍒涘缓锛?
-		for(int tooth = 0; tooth < Z; ++tooth) {
-			double toothAngle = tooth * angularPitch;
-
-			// 娓愬紑绾垮乏渚?(浠庨娇鏍瑰埌榻块《)
-			for(size_t i = 0; i < involuteLeft.size() - 1; ++i) {
-				gp_Pnt p1 = rotatePoint(involuteLeft[i], toothAngle);
-				gp_Pnt p2 = rotatePoint(involuteLeft[i + 1], toothAngle);
-				if(p1.Distance(p2) > 1e-6) {
-					TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(p1, p2);
-					wireBuilder.Add(edge);
-				}
-			}
-
-			// 榻块《鍦嗗姬
-			gp_Pnt tipLeft	= rotatePoint(involuteLeft.back(), toothAngle);
-			gp_Pnt tipRight = rotatePoint(involuteRight.back(), toothAngle);
-
-			if(tipLeft.Distance(tipRight) > 1e-6) {
-				// 浣跨敤鍦嗗姬杩炴帴榻块《
-				gp_Pnt tipMid((tipLeft.X() + tipRight.X()) / 2.0 * Ra
-								  / std::sqrt(std::pow((tipLeft.X() + tipRight.X()) / 2.0, 2)
-											  + std::pow((tipLeft.Y() + tipRight.Y()) / 2.0, 2)),
-							  (tipLeft.Y() + tipRight.Y()) / 2.0 * Ra
-								  / std::sqrt(std::pow((tipLeft.X() + tipRight.X()) / 2.0, 2)
-											  + std::pow((tipLeft.Y() + tipRight.Y()) / 2.0, 2)),
-							  0);
-				try {
-					GC_MakeArcOfCircle arcMaker(tipLeft, tipMid, tipRight);
-					if(arcMaker.IsDone()) {
-						TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker.Value());
-						wireBuilder.Add(arcEdge);
-					} else {
-						// 濡傛灉鍦嗗姬澶辫触锛屼娇鐢ㄧ洿绾?
-						TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(tipLeft, tipRight);
-						wireBuilder.Add(edge);
-					}
-				} catch(...) {
-					TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(tipLeft, tipRight);
-					wireBuilder.Add(edge);
-				}
-			}
-
-			// 娓愬紑绾垮彸渚?(浠庨娇椤跺埌榻挎牴)
-			for(int i = (int)involuteRight.size() - 1; i > 0; --i) {
-				gp_Pnt p1 = rotatePoint(involuteRight[i], toothAngle);
-				gp_Pnt p2 = rotatePoint(involuteRight[i - 1], toothAngle);
-				if(p1.Distance(p2) > 1e-6) {
-					TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(p1, p2);
-					wireBuilder.Add(edge);
-				}
-			}
-
-			// 榻挎牴鍦嗗姬 (杩炴帴鍒颁笅涓€涓娇)
-			gp_Pnt rootRight	= rotatePoint(involuteRight.front(), toothAngle);
-			gp_Pnt nextRootLeft = rotatePoint(involuteLeft.front(), toothAngle + angularPitch);
-
-			if(rootRight.Distance(nextRootLeft) > 1e-6) {
-				// 璁＄畻榻挎牴鍦嗗姬鐨勮捣濮嬪拰缁撴潫瑙掑害
-				double rootRightAngle	 = std::atan2(rootRight.Y(), rootRight.X());
-				double nextRootLeftAngle = std::atan2(nextRootLeft.Y(), nextRootLeft.X());
-				qDebug() << " 绗簩涓娇杞?cya 0312 ========== 榻挎牴鐐硅皟璇曚俊鎭?==========";
-				qDebug() << "toothAngle:" << toothAngle << "rad (" << toothAngle * 180/M_PI << "掳)";
-				qDebug() << "angularPitch:" << angularPitch << "rad (" << angularPitch * 180/M_PI << "掳)";
-				qDebug() << "next tooth angle:" << toothAngle + angularPitch << "rad ("
-				         << (toothAngle + angularPitch) * 180/M_PI << "掳)";
-				qDebug() << "\n--- 褰撳墠榻垮彸渚ф笎寮€绾胯捣鐐?---";
-				qDebug() << "鍘熷鐐?(involuteRight.front()):";
-				qDebug() << "  X:" << involuteRight.front().X();
-				qDebug() << "  Y:" << involuteRight.front().Y();
-				qDebug() << "  Z:" << involuteRight.front().Z();
-
-				// 纭繚瑙掑害杩炵画锛堝鐞嗚法瓒?搴︾殑鎯呭喌锛?
-				if(nextRootLeftAngle < rootRightAngle) {
-					nextRootLeftAngle += 2.0 * M_PI;
-					qDebug() << "cya 0312璋冩暣鍚巒extRootLeft瑙掑害:" << nextRootLeftAngle * 180/M_PI << "掳";
-				}
-
-				// 璁＄畻榻挎牴鍦嗗姬鐨勮搴﹁法搴?
-				double rootArcSpan = nextRootLeftAngle - rootRightAngle;
-                qDebug() << "cya 0312 root arc span:" << rootArcSpan;
-				// 濡傛灉鍦嗗姬瑙掑害瓒呰繃180搴︼紝闄愬埗涓?80搴?
-				if(rootArcSpan > M_PI) {
-                    qDebug() << "root arc span > 180 deg, using 180 deg arc";
-					// 璁＄畻180搴﹀渾寮х殑缁堢偣瑙掑害
-					double limitedEndAngle = rootRightAngle + M_PI;
-					// 鍦嗗姬涓偣锛堟伆濂藉湪璧风偣鍋忕Щ90搴﹀锛?
-					double rootMidAngle	   = rootRightAngle + M_PI / 2.0;
-					gp_Pnt rootMid(Rf * std::cos(rootMidAngle), Rf * std::sin(rootMidAngle), 0);
-					// 180搴﹀渾寮х殑缁堢偣
-					gp_Pnt arcEnd(Rf * std::cos(limitedEndAngle), Rf * std::sin(limitedEndAngle), 0);
-
-					try {
-						// 鍒涘缓180搴﹀渾寮?
-						GC_MakeArcOfCircle arcMaker(rootRight, rootMid, arcEnd);
-						if(arcMaker.IsDone()) {
-							wireBuilder.Add(BRepBuilderAPI_MakeEdge(arcMaker.Value()));
-						}
-					} catch(...) {
-					}
-
-					// 鐢ㄧ洿绾胯繛鎺ュ墿浣欓儴鍒嗭紙浠庡渾寮х粓鐐瑰埌涓嬩竴涓娇鐨勬笎寮€绾胯捣鐐癸級
-					if(arcEnd.Distance(nextRootLeft) > 1e-6) {
-						TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(arcEnd, nextRootLeft);
-						wireBuilder.Add(edge);
-					}
-				} else {
-					qDebug() << "榻挎牴鍦嗗皬浜?80";
-					// 鍦嗗姬瑙掑害涓嶈秴杩?80搴︼紝姝ｅ父澶勭悊
-					double rootMidAngle = (rootRightAngle + nextRootLeftAngle) / 2.0;
-					gp_Pnt rootMid(Rf * std::cos(rootMidAngle), Rf * std::sin(rootMidAngle), 0);
-					qDebug() << "涓偣瑙掑害:" << rootMidAngle * 180/M_PI << "掳";
-					qDebug() << "涓偣鍧愭爣: (" << rootMid.X() << "," << rootMid.Y() << ")";
-					// 楠岃瘉涓夌偣鏄惁鍏辩嚎
-					double det = rootRight.X() * (rootMid.Y() - nextRootLeft.Y()) +
-						rootMid.X() * (nextRootLeft.Y() - rootRight.Y()) +
-						nextRootLeft.X() * (rootRight.Y() - rootMid.Y());
-					qDebug() << "涓夌偣鍏辩嚎妫€娴?(det):" << det;
-					if(qAbs(det) < 1e-10) {
-                        qDebug() << "Warning: three points are nearly collinear.";
-					}
-					try {
-						GC_MakeArcOfCircle arcMaker(rootRight, rootMid, nextRootLeft);
-						if(arcMaker.IsDone()) {
-                            qDebug() << "arc created successfully";
-							TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker.Value());
-							wireBuilder.Add(arcEdge);
-						} else {
-							qDebug() << "鍦嗗姬鍒涘缓澶辫触锛屼娇鐢ㄤ笁鐐瑰渾寮х殑鏇夸唬鏂规硶";
-							gp_Circ circle(gp_Ax2(gp_Pnt(0,0,0), gp_Dir(0,0,1)), Rf);
-							GC_MakeArcOfCircle arcMaker2(circle, rootRightAngle, nextRootLeftAngle, true);
-							if(arcMaker2.IsDone()) {
-								TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker2.Value());
-								wireBuilder.Add(arcEdge);
-                                qDebug() << "circle-center method created arc successfully";
-							} else {
-								TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
-								wireBuilder.Add(edge);
-								qDebug() << "浣跨敤鐩寸嚎鏇夸唬";
-							}
-						}
-					} catch(...) {
-						qDebug() << "寮傚父锛屼娇鐢ㄥ渾蹇冩硶鍒涘缓鍦嗗姬";
-						try {
-							gp_Circ circle(gp_Ax2(gp_Pnt(0,0,0), gp_Dir(0,0,1)), Rf);
-							GC_MakeArcOfCircle arcMaker2(circle, rootRightAngle, nextRootLeftAngle, true);
-							if(arcMaker2.IsDone()) {
-								TopoDS_Edge arcEdge = BRepBuilderAPI_MakeEdge(arcMaker2.Value());
-								wireBuilder.Add(arcEdge);
-							} else {
-								TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
-								wireBuilder.Add(edge);
-							}
-						} catch(...) {
-							TopoDS_Edge edge = BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft);
-							wireBuilder.Add(edge);
-						}
-					}
-				}
-			}
-		}
-
-		// 鍏堝湪 (0,0,0) 鍒涘缓 Wire
-		TopoDS_Wire wire = wireBuilder.Wire();
-
-		// 鏈€鍚庣粺涓€骞崇Щ鍒?(0, centerDistance, 0)
-		gp_Trsf transform;
-		transform.SetTranslation(gp_Vec(0, centerDistance, 0));
-		BRepBuilderAPI_Transform transformMaker(wire, transform);
-		TopoDS_Wire transformedWire = TopoDS::Wire(transformMaker.Shape());
-
-		return transformedWire;
+		// Thin wrapper. Geometry built by buildGearProfileWire then translated to (0, a', 0).
+		const double cd = centerDistanceBetweenGears();
+		return buildGearProfileWire(_numberOfSecondTeeth, _numberOfTeeth,
+		                            _x2, _x1 + _x2,
+		                            _tipReliefAmount2, _tipReliefLength2,
+		                            gp_Pnt(0, cd, 0));
 	}
 
 	double GeoCommandCreateGear::centerDistanceBetweenGears() const
@@ -996,7 +477,8 @@ qDebug() << "  Z:" << involuteRight.front().Z();
 	}
 
 	TopoDS_Shape GeoCommandCreateGear::extrudeProfile(const TopoDS_Wire& outerProfile,
-													  const TopoDS_Wire& innerHoleWire)
+													  const TopoDS_Wire& innerHoleWire,
+													  double thickness)
 	{
 		// 鍦╔Y骞抽潰涓婂垱寤洪潰锛堝鐜?+ 涓績瀛旈棴鐜級
 		gp_Pln					plane(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1));
@@ -1014,7 +496,7 @@ qDebug() << "  Z:" << involuteRight.front().Z();
 		// 娌縕杞存媺浼?
 		// 浣跨敤涓?GeoCommandMakeExtrusion 鐩稿悓鐨勫弬鏁帮細Copy=true, Canonize=false
 		// 杩欐牱鍙互纭繚鐢熸垚 Solid 鑰屼笉鏄?Shell
-		gp_Vec				  extrusionDir(0, 0, _thickness);
+		gp_Vec				  extrusionDir(0, 0, thickness);
 		BRepPrimAPI_MakePrism prismMaker(face, extrusionDir, true, false);
 
 		if(!prismMaker.IsDone()) {
@@ -1047,7 +529,7 @@ qDebug() << "  Z:" << involuteRight.front().Z();
 		TopoDS_Wire				   holeWire1 = createCenterHoleWire(holeRadius, gp_Pnt(0, 0, 0));
 
 		// 鎷変几鐢熸垚3D榻胯疆
-		TopoDS_Shape gearShape = extrudeProfile(profile, holeWire1);
+		TopoDS_Shape gearShape = extrudeProfile(profile, holeWire1, _thickness);
 		if(gearShape.IsNull()) {
 			return false;
 		}
@@ -1060,7 +542,7 @@ qDebug() << "  Z:" << involuteRight.front().Z();
 			createCenterHoleWire(holeRadius2, gp_Pnt(0, centerDistance, 0));
 
 		// 鎷変几鐢熸垚绗簩涓?D榻胯疆
-		TopoDS_Shape secondGearShape = extrudeProfile(secondProfile, holeWire2);
+		TopoDS_Shape secondGearShape = extrudeProfile(secondProfile, holeWire2, _thickness2);
 		if(secondGearShape.IsNull()) {
 			return false;
 		}
@@ -1082,31 +564,42 @@ qDebug() << "  Z:" << involuteRight.front().Z();
         }
     }
 		// 鍚堝苟涓や釜榻胯疆
-		BRepAlgoAPI_Fuse fuseMaker(gearShape, secondGearShape);
-		if(!fuseMaker.IsDone()) {
-			return false;
-		}
-		TopoDS_Shape combinedShape = fuseMaker.Shape();
+		TopoDS_Shape* shape1 = new TopoDS_Shape;
+		*shape1 = gearShape;
+		TopoDS_Shape* shape2 = new TopoDS_Shape;
+		*shape2 = secondGearShape;
 
-		// 鍒涘缓褰㈢姸鎸囬拡
-		TopoDS_Shape* shape		   = new TopoDS_Shape;
-		*shape					   = combinedShape;
+		Geometry::GeometrySet* set1 = new Geometry::GeometrySet(Geometry::STEP);
+		set1->setShape(shape1);
+		Geometry::GeometrySet* set2 = new Geometry::GeometrySet(Geometry::STEP);
+		set2->setShape(shape2);
 
-		// 鍒涘缓鍑犱綍闆嗗璞?
-		Geometry::GeometrySet* set = new Geometry::GeometrySet(Geometry::STEP);
-		set->setShape(shape);
-		_res = set;
+		_res  = set1;
+		_res2 = set2;
+
+		const double Rf1 = _module * _numberOfTeeth        / 2.0 - _dedendumCoeff * _module;
+		const double Rf2 = _module * _numberOfSecondTeeth  / 2.0 - _dedendumCoeff * _module;
+		tagGearFaces(set1, holeRadius,  Rf1 > 0 ? Rf1 : 0.1 * _module);
+		tagGearFaces(set2, holeRadius2, Rf2 > 0 ? Rf2 : 0.1 * _module);
+
+		const QString baseName = _name.isEmpty() ? QStringLiteral("Gear") : _name;
+		const QString name1    = baseName + QStringLiteral("_1");
+		const QString name2    = baseName + QStringLiteral("_2");
 
 		if(_isEdit) {
-			set->setName(_editSet->getName());
-			_geoData->replaceSet(set, _editSet);
+			set1->setName(_editSet->getName());
+			_geoData->replaceSet(set1, _editSet);
 			emit removeDisplayActor(_editSet);
+			set2->setName(name2);
+			_geoData->appendGeometrySet(set2);
 		} else {
-			set->setName(_name);
-			_geoData->appendGeometrySet(set);
+			set1->setName(name1);
+			set2->setName(name2);
+			_geoData->appendGeometrySet(set1);
+			_geoData->appendGeometrySet(set2);
 		}
 
-		// 鍒涘缓鍙傛暟瀵硅薄
+		// Build parameter object, attach to primary gear Set.
 		Geometry::GeometryParaGear* para = new Geometry::GeometryParaGear;
 		para->setName(_name);
 		para->setNumberOfTeeth(_numberOfTeeth);
@@ -1117,14 +610,20 @@ qDebug() << "  Z:" << involuteRight.front().Z();
 		para->setDedendumCoefficient(_dedendumCoeff);
 		para->setFilletCoefficient(_filletCoeff);
 		para->setThickness(_thickness);
+		para->setThickness2(_thickness2);
 		para->setExternalGear(_externalGear);
 		para->setTipReliefAmount(_tipReliefAmount);
 		para->setTipReliefLength(_tipReliefLength);
+		para->setTipReliefAmount2(_tipReliefAmount2);
+		para->setTipReliefLength2(_tipReliefLength2);
+		para->setProfileShiftCoefficient1(_x1);
+		para->setProfileShiftCoefficient2(_x2);
 		_res->setParameter(para);
 
 		GeoCommandBase::execute();
 		emit updateGeoTree();
-		emit showSet(set);
+		emit showSet(set1);
+		emit showSet(set2);
 
 		return true;
 	}
@@ -1132,11 +631,14 @@ qDebug() << "  Z:" << involuteRight.front().Z();
 	void GeoCommandCreateGear::undo()
 	{
 		emit removeDisplayActor(_res);
+		if(_res2) emit removeDisplayActor(_res2);
 		if(_isEdit) {
 			_geoData->replaceSet(_editSet, _res);
 			emit showSet(_editSet);
+			if(_res2) _geoData->removeTopGeometrySet(_res2);
 		} else {
 			_geoData->removeTopGeometrySet(_res);
+			if(_res2) _geoData->removeTopGeometrySet(_res2);
 		}
 		GeoCommandBase::undo();
 		emit updateGeoTree();
@@ -1147,18 +649,117 @@ qDebug() << "  Z:" << involuteRight.front().Z();
 		if(_isEdit) {
 			_geoData->replaceSet(_res, _editSet);
 			emit removeDisplayActor(_editSet);
+			if(_res2) _geoData->appendGeometrySet(_res2);
 		} else {
 			_geoData->appendGeometrySet(_res);
+			if(_res2) _geoData->appendGeometrySet(_res2);
 		}
 		emit updateGeoTree();
 		emit showSet(_res);
+		if(_res2) emit showSet(_res2);
 	}
 
 	void GeoCommandCreateGear::releaseResult()
 	{
-		if(_res != nullptr)
-			delete _res;
+		if(_res != nullptr)  delete _res;
 		_res = nullptr;
+		if(_res2 != nullptr) delete _res2;
+		_res2 = nullptr;
+	}
+
+	// ==================== Semantic face tags  ====================
+	//
+	// 几何观察：齿廓 wire 是用 50+ 段折线 + 弧近似的渐开线，extrude 出 3D 后
+	// **每段折线变成一个 BSpline / 平面 ruled face**——不是单一圆柱面。所以
+	// 仅按 GeomAbs_Cylinder 半径分类只能识别 hub_hole，root_fillet 实际是 fillet
+	//
+	// 修复策略：统一用**包围盒中心到齿轮轴的径向距离 r** 分类（不依赖面类型）：
+	//   * Z 法向平面（front/back 端面）→ 单独按 Z 极值定 front_face / back_face
+	//   * 其它面：以 r 与 holeRadius / rootRadius / pitchRadius 比较定 tag
+	//       r ≤ holeRadius * (1 + 5%)        → hub_hole
+	//       r ≤ rootRadius * (1 - 1%)        → 介于 hub 和 root 之间的过渡面
+	//                                          (实际不应有，落入 tooth_flank 兜底)
+	//       r ∈ [rootRadius*(1-1%), rootRadius*(1+5%)] → root_fillet
+	//       r > rootRadius * (1 + 5%)        → tooth_flank
+	//
+	// 齿轮轴：取 GeometrySet 的 shape bbox 的 XY 中心。GearCommand 把每个齿轮
+	// 单独建在自己的 set 里，所以 bbox 中心 ≈ 该齿轮的轴心。
+	void GeoCommandCreateGear::tagGearFaces(Geometry::GeometrySet* set,
+	                                        double holeRadius,
+	                                        double rootRadius)
+	{
+		if(!set) return;
+		TopoDS_Shape* shapePtr = set->getShape();
+		if(!shapePtr || shapePtr->IsNull()) return;
+		const TopoDS_Shape& shape = *shapePtr;
+
+		// 整体包围盒 → 推断齿轮轴 (xc, yc)
+		Bnd_Box gearBox;
+		BRepBndLib::Add(shape, gearBox);
+		if(gearBox.IsVoid()) return;
+		double gxmin, gymin, gzmin, gxmax, gymax, gzmax;
+		gearBox.Get(gxmin, gymin, gzmin, gxmax, gymax, gzmax);
+		const double axisX = 0.5 * (gxmin + gxmax);
+		const double axisY = 0.5 * (gymin + gymax);
+
+		// 半径阈值
+		const double rHubMax  = holeRadius  * 1.05;
+		const double rRootMin = rootRadius  * 0.99;
+		const double rRootMax = rootRadius  * 1.05;
+
+		double zMaxPlane = -std::numeric_limits<double>::infinity();
+		double zMinPlane =  std::numeric_limits<double>::infinity();
+		int    frontId = -1, backId = -1;
+
+		int idx = 0;
+		for(TopExp_Explorer exp(shape, TopAbs_FACE); exp.More(); exp.Next(), ++idx) {
+			TopoDS_Face f = TopoDS::Face(exp.Current());
+			BRepAdaptor_Surface surf(f, Standard_True);
+			GeomAbs_SurfaceType st = surf.GetType();
+
+			Bnd_Box bb;
+			BRepBndLib::Add(f, bb);
+			if(bb.IsVoid()) continue;
+			double fxmin, fymin, fzmin, fxmax, fymax, fzmax;
+			bb.Get(fxmin, fymin, fzmin, fxmax, fymax, fzmax);
+
+			// 端面（Z 法向平面）单独处理
+			if(st == GeomAbs_Plane) {
+				gp_Dir n = surf.Plane().Axis().Direction();
+				if(std::abs(n.Z()) > 0.99) {
+					const double zMid = 0.5 * (fzmin + fzmax);
+					if(zMid > zMaxPlane) { zMaxPlane = zMid; frontId = idx; }
+					if(zMid < zMinPlane) { zMinPlane = zMid; backId  = idx; }
+					continue;
+				}
+			}
+
+			// 径向距离：以 face bbox 中心到齿轮轴
+			const double fcx = 0.5 * (fxmin + fxmax);
+			const double fcy = 0.5 * (fymin + fymax);
+			const double dx  = fcx - axisX;
+			const double dy  = fcy - axisY;
+			const double r   = std::sqrt(dx * dx + dy * dy);
+
+			if(r <= rHubMax) {
+				set->setSemanticTag(idx, QStringLiteral("hub_hole"));
+			} else if(r >= rRootMin && r <= rRootMax) {
+				set->setSemanticTag(idx, QStringLiteral("root_fillet"));
+			} else {
+				set->setSemanticTag(idx, QStringLiteral("tooth_flank"));
+			}
+		}
+		if(frontId >= 0) set->setSemanticTag(frontId, QStringLiteral("front_face"));
+		if(backId  >= 0 && backId != frontId)
+			set->setSemanticTag(backId, QStringLiteral("back_face"));
+
+#ifdef GEAR_DEBUG
+		qDebug() << "tagGearFaces: faces =" << idx
+		         << ", hub_hole =" << set->getFacesByTag("hub_hole").size()
+		         << ", root_fillet =" << set->getFacesByTag("root_fillet").size()
+		         << ", tooth_flank =" << set->getFacesByTag("tooth_flank").size()
+		         << ", front/back =" << (frontId >= 0) << "/" << (backId >= 0);
+#endif
 	}
 } // namespace Command
 

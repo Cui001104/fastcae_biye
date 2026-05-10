@@ -66,6 +66,9 @@ namespace Ui {
 		SARibbonPannel*			 post_viewer_pannel{};
 		SARibbonPannel*			 post_editor_pannel{};
 
+		QAction*				 actionGearOpt{};
+		SARibbonPannel*			 gear_opt_pannel{};
+
 		void					 setupRibbonUi(QMainWindow* MainWindow);
 		void					 retranslateRibbonUi(QMainWindow* MainWindow);
 	};

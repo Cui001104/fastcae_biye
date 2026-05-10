@@ -99,6 +99,16 @@ namespace Geometry
 		return _thickness;
 	}
 
+	void GeometryParaGear::setThickness2(double t)
+	{
+		_thickness2 = t;
+	}
+
+	double GeometryParaGear::getThickness2()
+	{
+		return _thickness2;
+	}
+
 	void GeometryParaGear::setExternalGear(bool external)
 	{
 		_externalGear = external;
@@ -127,6 +137,46 @@ namespace Geometry
 	double GeometryParaGear::getTipReliefLength()
 	{
 		return _tipReliefLength;
+	}
+
+	void GeometryParaGear::setTipReliefAmount2(double amount)
+	{
+		_tipReliefAmount2 = amount;
+	}
+
+	double GeometryParaGear::getTipReliefAmount2()
+	{
+		return _tipReliefAmount2;
+	}
+
+	void GeometryParaGear::setTipReliefLength2(double length)
+	{
+		_tipReliefLength2 = length;
+	}
+
+	double GeometryParaGear::getTipReliefLength2()
+	{
+		return _tipReliefLength2;
+	}
+
+	void GeometryParaGear::setProfileShiftCoefficient1(double x1)
+	{
+		_x1 = x1;
+	}
+
+	double GeometryParaGear::getProfileShiftCoefficient1()
+	{
+		return _x1;
+	}
+
+	void GeometryParaGear::setProfileShiftCoefficient2(double x2)
+	{
+		_x2 = x2;
+	}
+
+	double GeometryParaGear::getProfileShiftCoefficient2()
+	{
+		return _x2;
 	}
 
 	QDomElement &GeometryParaGear::writeToProjectFile(QDomDocument *doc, QDomElement *parent)
@@ -170,6 +220,10 @@ namespace Geometry
 		thicknessEle.appendChild(doc->createTextNode(QString::number(_thickness)));
 		element.appendChild(thicknessEle);
 
+		QDomElement thickness2Ele = doc->createElement("Thickness2");
+		thickness2Ele.appendChild(doc->createTextNode(QString::number(_thickness2)));
+		element.appendChild(thickness2Ele);
+
 		QDomElement externalEle = doc->createElement("ExternalGear");
 		externalEle.appendChild(doc->createTextNode(_externalGear ? "true" : "false"));
 		element.appendChild(externalEle);
@@ -181,6 +235,22 @@ namespace Geometry
 		QDomElement tipReliefLengthEle = doc->createElement("TipReliefLength");
 		tipReliefLengthEle.appendChild(doc->createTextNode(QString::number(_tipReliefLength)));
 		element.appendChild(tipReliefLengthEle);
+
+		QDomElement tipReliefAmount2Ele = doc->createElement("TipReliefAmount2");
+		tipReliefAmount2Ele.appendChild(doc->createTextNode(QString::number(_tipReliefAmount2)));
+		element.appendChild(tipReliefAmount2Ele);
+
+		QDomElement tipReliefLength2Ele = doc->createElement("TipReliefLength2");
+		tipReliefLength2Ele.appendChild(doc->createTextNode(QString::number(_tipReliefLength2)));
+		element.appendChild(tipReliefLength2Ele);
+
+		QDomElement x1Ele = doc->createElement("ProfileShiftCoefficient1");
+		x1Ele.appendChild(doc->createTextNode(QString::number(_x1)));
+		element.appendChild(x1Ele);
+
+		QDomElement x2Ele = doc->createElement("ProfileShiftCoefficient2");
+		x2Ele.appendChild(doc->createTextNode(QString::number(_x2)));
+		element.appendChild(x2Ele);
 
 		parent->appendChild(element);
 		return element;
@@ -213,12 +283,22 @@ namespace Geometry
 				_filletCoeff = value.toDouble();
 			else if (name == "Thickness")
 				_thickness = value.toDouble();
+			else if (name == "Thickness2")
+				_thickness2 = value.toDouble();
 			else if (name == "ExternalGear")
 				_externalGear = (value == "true");
 			else if (name == "TipReliefAmount")
 				_tipReliefAmount = value.toDouble();
 			else if (name == "TipReliefLength")
 				_tipReliefLength = value.toDouble();
+			else if (name == "TipReliefAmount2")
+				_tipReliefAmount2 = value.toDouble();
+			else if (name == "TipReliefLength2")
+				_tipReliefLength2 = value.toDouble();
+			else if (name == "ProfileShiftCoefficient1")
+				_x1 = value.toDouble();
+			else if (name == "ProfileShiftCoefficient2")
+				_x2 = value.toDouble();
 		}
 	}
 }

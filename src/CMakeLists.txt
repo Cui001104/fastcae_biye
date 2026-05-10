@@ -3,7 +3,7 @@ set(SOVERSION ${PROJECT_VERSION} ${PROJECT_VERSION_MAJOR} ${PROJECT_VERSION_MINO
 #-----------------------------------------------------------------------------
 # 所有项目
 #-----------------------------------------------------------------------------
-list(APPEND _libraries Common PythonModule SARibbonBar Settings DataProperty MeshData SelfDefObject Material Geometry BCBase ConfigOptions ParaClassFactory ModelData ModuleBase PostAlgorithm PostRenderData PostInterface PostCurveDataManager PostPlotWidget PostWidgets GeometryDataExchange ProjectTree ProjectTreeExtend GeometryCommand GeometryWidgets PluginManager GmshModule IO SolverControl MainWidgets UserGuidence)
+list(APPEND _libraries Common PythonModule SARibbonBar Settings DataProperty MeshData SelfDefObject Material Geometry BCBase ConfigOptions ParaClassFactory ModelData ModuleBase PostAlgorithm PostRenderData PostInterface PostCurveDataManager PostPlotWidget PostWidgets GeometryDataExchange ProjectTree ProjectTreeExtend GeometryCommand GeometryWidgets PluginManager GmshModule IO SolverControl GearAutoOpt MainWidgets UserGuidence)
 
 #[[if(_WIN_)
 list(APPEND _libraries XGenerateReport License)

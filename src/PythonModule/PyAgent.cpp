@@ -1,4 +1,12 @@
-﻿#include <Python.h>
+﻿// MSVC Debug 模式下 Python.h 会要求链接 python3x_d.lib，
+// 而标准 Python 安装不包含该文件；临时屏蔽 _DEBUG 绕过此行为。
+#if defined(_MSC_VER) && defined(_DEBUG)
+#  undef _DEBUG
+#  include <Python.h>
+#  define _DEBUG
+#else
+#  include <Python.h>
+#endif
 #include <QCoreApplication>
 #include <QDebug>
 #include <QDir>
@@ -11,10 +19,6 @@
 #include "PyInterpreter.h"
 #include "RecordScript.h"
 #include "ScriptReader.h"
-
-#ifdef Q_OS_WIN32
-#include <atlconv.h>
-#endif
 
 #include <locale.h>
 

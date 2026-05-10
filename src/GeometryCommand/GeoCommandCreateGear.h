@@ -46,6 +46,7 @@ namespace Command {
 		void setFilletCoefficient(double coeff);
 		/// 设置齿轮厚度 (mm)
 		void setThickness(double t);
+		void setThickness2(double t);
 		/// 设置是否为外齿轮
 		void setExternalGear(bool external);
 		/// 设置齿顶修型量 (mm)
@@ -61,15 +62,22 @@ namespace Command {
 	private:
 		/// 生成渐开线齿廓点
 		void		 generateInvolutePoints(std::vector<gp_Pnt>& points);
-		/// 创建齿轮2D轮廓线
+		/// 创建齿轮2D轮廓线（gear 1，原点）
 		TopoDS_Wire	 createGearProfile();
+		/// 创建第二齿轮2D轮廓线（gear 2，平移到中心距处）
 		TopoDS_Wire createSecondGearProfile();
+		/// 通用齿廓生成核心：根据自身齿数/变位、对方齿数/变位总和、修型参数、放置中心生成 2D 齿廓 wire。
+		/// xSum = x1 + x2，两齿轮共用，用于计算变位中心距与齿顶高变动系数 y_delt。
+		TopoDS_Wire  buildGearProfileWire(int Z, int Zmate,
+		                                  double xOwn, double xSum,
+		                                  double tipReliefAmount, double tipReliefLength,
+		                                  const gp_Pnt& center);
 		/// 分度圆直径对应的中心圆柱孔闭合线（反向 orientation，用作面内孔）
 		TopoDS_Wire	 createCenterHoleWire(double holeRadius, const gp_Pnt& centerOnXYPlane) const;
 		/// 两齿轮轴线方向上的标准/变位中心距（与 createSecondGearProfile 平移一致）
 		double		 centerDistanceBetweenGears() const;
 		/// 拉伸生成3D齿轮（外轮廓 + 中心内孔闭环）
-		TopoDS_Shape extrudeProfile(const TopoDS_Wire& outerProfile, const TopoDS_Wire& innerHoleWire);
+		TopoDS_Shape extrudeProfile(const TopoDS_Wire& outerProfile, const TopoDS_Wire& innerHoleWire, double thickness);
 
 	private:
 		QString				   _name{};
@@ -81,6 +89,7 @@ namespace Command {
 		double				   _dedendumCoeff{ 1.25 };
 		double				   _filletCoeff{ 0.38 };
 		double				   _thickness{ 10.0 };
+		double				   _thickness2{ 10.0 };
 		bool				   _externalGear{ true };
 		double				   _tipReliefAmount{ 0.0 }; ///< 齿顶修型量 (mm)
 		double				   _tipReliefLength{ 0.0 }; ///< 齿顶修型长度 (mm)
@@ -89,7 +98,14 @@ namespace Command {
 		double				   _x1 { 0.0 };
 		double				   _x2{ 0.0 };//第二个齿轮的变位系数
 
-		Geometry::GeometrySet* _res{};
+		Geometry::GeometrySet* _res{};   ///< 主齿轮 GeometrySet
+		Geometry::GeometrySet* _res2{};  ///< 副齿轮 GeometrySet 
+
+		/// 规则：圆柱面半径 ≈ holeRadius → "hub_hole"；
+		///       圆柱面半径 ≈ Rf (齿根) → "root_fillet"；
+		///       平面 (Z 法向) → "front_face" / "back_face" 按 Z 高低；
+		///       其余面（渐开线齿廓）→ "tooth_flank"。
+		void tagGearFaces(Geometry::GeometrySet* set, double holeRadius, double rootRadius);
 	};
 } // namespace Command
 

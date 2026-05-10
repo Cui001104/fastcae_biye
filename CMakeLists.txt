@@ -124,7 +124,7 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 
-list(APPEND QtNeededModules 
+list(APPEND QtNeededModules
 	Core
 	Widgets
 	Gui
@@ -133,6 +133,7 @@ list(APPEND QtNeededModules
 	OpenGL	# Qwt
 	PrintSupport	# QwtPolar
 	DBus
+	Sql	
 )
 if(FASTCAE_LINUX)
 	list(APPEND QtNeededModules XcbQpa)

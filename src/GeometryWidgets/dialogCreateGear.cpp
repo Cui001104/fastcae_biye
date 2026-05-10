@@ -64,6 +64,7 @@ namespace GeometryWidget {
 			_ui->doubleSpinBoxDedendum->setValue(p->getDedendumCoefficient());
 			_ui->doubleSpinBoxFillet->setValue(p->getFilletCoefficient());
 			_ui->doubleSpinBoxThickness->setValue(p->getThickness());
+			_ui->doubleSpinBoxThickness2->setValue(p->getThickness2());
 			_ui->comboBoxGearType->setCurrentIndex(p->isExternalGear() ? 0 : 1);
 			_ui->doubleSpinBoxTipReliefAmount->setValue(p->getTipReliefAmount());
 			_ui->doubleSpinBoxTipReliefLength->setValue(p->getTipReliefLength());
@@ -93,7 +94,7 @@ namespace GeometryWidget {
 		double thickness2       = _ui->doubleSpinBoxThickness2->value();//cui 20260118 第二个齿轮的齿厚
 		bool   externalGear	   = (_ui->comboBoxGearType->currentIndex() == 0);
 		double tipReliefAmount = _ui->doubleSpinBoxTipReliefAmount->value();
-		//cui 20260118 第二个齿轮的齿顶修形�?
+		//cui 20260118 第二个齿轮的齿顶修形�?
 		double tipReliefAmount2 =_ui->doubleSpinBoxTipReliefAmount2->value();
 		double tipReliefLength2 =_ui->doubleSpinBoxTipReliefLength2->value();
 		double tipReliefLength = _ui->doubleSpinBoxTipReliefLength->value();
@@ -134,6 +135,7 @@ namespace GeometryWidget {
 		command->setprofileShiftCoefficient2(profileShiftCoefficient2);
 		// 设置第二个齿轮的参数
 		command->setNumberOfSecondTeeth(numberOfSecondTeeth);
+		command->setThickness2(thickness2);
 		command->setTipReliefAmount2(tipReliefAmount2);
 		command->setTipReliefLength2(tipReliefLength2);
 
@@ -152,11 +154,11 @@ namespace GeometryWidget {
 
 	void CreateGearDialog::onGearTypeChanged(int index)
 	{
-		// 当切换齿轮类型时，更新齿顶高系数默认�?
-		if(index == 0) // 外齿�?
+		// 当切换齿轮类型时，更新齿顶高系数默认�?
+		if(index == 0) // 外齿�?
 		{
 			_ui->doubleSpinBoxAddendum->setValue(1.0);
-		} else // 内齿�?
+		} else // 内齿�?
 		{
 			_ui->doubleSpinBoxAddendum->setValue(0.6);
 		}

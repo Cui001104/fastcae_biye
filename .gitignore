@@ -5,3 +5,7 @@
 /extlib
 /cmake-build-debug
 /cmake-build-release
+/tools
+/runs
+/gear_opt.db
+/test

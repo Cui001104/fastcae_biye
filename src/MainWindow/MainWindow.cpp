@@ -39,6 +39,7 @@
 #include "MainWidgets/DialogCreateSet.h"
 #include "MainWidgets/DialogFilterMesh.h"
 #include "MainWidgets/DialogVTKTransform.h"
+#include "GearAutoOpt/gui/GearOptDialog.h"
 #include "MainWidgets/messageWindow.h"
 #include "MainWidgets/preWindow.h"
 #include "MainWidgets/ProcessWindow.h"
@@ -237,6 +238,7 @@ namespace GUI {
 				Plugins::PluginManager::getInstance(), SLOT(manage()));
 		connect(_ui->actionFilterMesh, SIGNAL(triggered()), this, SLOT(on_FilterMesh()));
 		connect(_ui->actionVTKTranslation, SIGNAL(triggered()), this, SLOT(on_VTKTranslation()));
+		connect(_ui->actionGearOpt, SIGNAL(triggered()), this, SLOT(on_gearOpt()));
 
 		// 设置视角
 		_viewSignalMapper = new QSignalMapper(this);
@@ -1221,6 +1223,12 @@ namespace GUI {
 	void MainWindow::on_VTKTranslation()
 	{
 		MainWidget::DialogVTKTransform dlg(this);
+		dlg.exec();
+	}
+
+	void MainWindow::on_gearOpt()
+	{
+		GearAutoOpt::GearOptDialog dlg(this);
 		dlg.exec();
 	}
 

@@ -391,6 +391,8 @@ namespace GUI {
 		void on_FilterMesh();
 		// 创建VTK空间变换窗口
         void on_VTKTranslation();
+		//打开齿轮多目标优化对话框
+		void on_gearOpt();
 
 	private:
 		/*初始化Menu*/

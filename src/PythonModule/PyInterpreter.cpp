@@ -1,4 +1,10 @@
-﻿#include <Python.h>
+﻿#if defined(_MSC_VER) && defined(_DEBUG)
+#  undef _DEBUG
+#  include <Python.h>
+#  define _DEBUG
+#else
+#  include <Python.h>
+#endif
 #include "PyInterpreter.h"
 #include "PyAgent.h"
 #include <QCoreApplication>
