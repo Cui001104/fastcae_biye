@@ -283,6 +283,49 @@ void GearDesignPoint::syncLegacyResultFields()
 		mass = mass_total;
 }
 
+bool validateReliefDesign(GearDesignPoint& p, QString* reason)
+{
+	if (p.ca1 <= kCaEps) {
+		p.ca1  = 0.0;
+		p.lca1 = 0.0;
+	}
+	if (p.ca2 <= kCaEps) {
+		p.ca2  = 0.0;
+		p.lca2 = 0.0;
+	}
+
+	if (p.ca1 > kCaEps && p.lca1 < kMinReliefLength) {
+		if (reason) {
+			*reason = QStringLiteral("ca1=%1 > 0 requires lca1 >= %2 mm, got lca1=%3")
+			              .arg(p.ca1, 0, 'g', 8)
+			              .arg(kMinReliefLength, 0, 'g', 6)
+			              .arg(p.lca1, 0, 'g', 8);
+		}
+		return false;
+	}
+	if (p.ca2 > kCaEps && p.lca2 < kMinReliefLength) {
+		if (reason) {
+			*reason = QStringLiteral("ca2=%1 > 0 requires lca2 >= %2 mm, got lca2=%3")
+			              .arg(p.ca2, 0, 'g', 8)
+			              .arg(kMinReliefLength, 0, 'g', 6)
+			              .arg(p.lca2, 0, 'g', 8);
+		}
+		return false;
+	}
+	return true;
+}
+
+void logInvalidReliefDesign(const GearDesignPoint& p, const QString& reason)
+{
+	qDebug().noquote()
+	    << QStringLiteral("[DesignCheck] skip invalid relief ca1=%1, lca1=%2, ca2=%3, lca2=%4, reason=%5")
+	           .arg(p.ca1, 0, 'g', 8)
+	           .arg(p.lca1, 0, 'g', 8)
+	           .arg(p.ca2, 0, 'g', 8)
+	           .arg(p.lca2, 0, 'g', 8)
+	           .arg(reason);
+}
+
 bool GearDesignPoint::isFeasible(QString* msg) const
 {
 	auto fail = [&](const QString& m) {

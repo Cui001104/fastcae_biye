@@ -120,7 +120,7 @@ struct GEARAUTOOPTAPI GearOptConfig {
 	Bounds   x1Bound;           ///< [-0.3, 0.6]
 	Bounds   x2Bound;
 	Bounds   ca1Bound;          ///< 齿顶修形量 [mm]，默认 [0, 0.35]
-	Bounds   lca1Bound;         ///< [0, 2*m] — 实际由 module 派生
+	Bounds   lca1Bound;         ///< [0.1, 2*m] — ca=0 时 lca 归一化为 0
 	Bounds   ca2Bound;
 	Bounds   lca2Bound;
 	Bounds   widthBound;        ///< [10, 30]

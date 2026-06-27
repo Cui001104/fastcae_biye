@@ -36,11 +36,17 @@ GearDesignPoint GearAutoOptManager::configuredBasePoint() const
     return dp;
 }
 
-static bool isValidSurrogateTrainingSample(const SurrogateSample& s)
+static bool isValidSurrogateTrainingSample(const SurrogateSample& s, const GearOptConfig& cfg)
 {
-    return s.cpressMax > 0.0 && std::isfinite(s.cpressMax)
-        && s.edgeLoadRatio > 0.0 && std::isfinite(s.edgeLoadRatio)
-        && s.cpressCV > 0.0 && std::isfinite(s.cpressCV);
+    if (s.cpressMax <= 0.0 || !std::isfinite(s.cpressMax))
+        return false;
+    if (s.edgeLoadRatio <= 0.0 || !std::isfinite(s.edgeLoadRatio))
+        return false;
+    if (s.cpressCV <= 0.0 || !std::isfinite(s.cpressCV))
+        return false;
+    if (cfg.objectives.minSigmaMax && (s.sigmaMax <= 0.0 || !std::isfinite(s.sigmaMax)))
+        return false;
+    return true;
 }
 
 static std::pair<double, double> paretoObjectiveMax(const Population& pareto)
@@ -59,14 +65,15 @@ static std::pair<double, double> paretoObjectiveMax(const Population& pareto)
 }
 
 static QVector<SurrogateSample> loadMergedValidatedSamples(const QString& baseCaseH,
-                                                           double fixedWidthMm)
+                                                           double fixedWidthMm,
+                                                           const GearOptConfig& cfg)
 {
     QHash<QString, SurrogateSample> uniq;
     auto ingestDb = [&](GearOptResultDatabase& db) {
         if (!db.isOpen())
             return;
         for (const SurrogateSample& s : db.loadValidatedSamples(baseCaseH, fixedWidthMm)) {
-            if (!isValidSurrogateTrainingSample(s))
+            if (!isValidSurrogateTrainingSample(s, cfg))
                 continue;
             const QString key = s.designHash.isEmpty()
                                     ? QStringLiteral("idx_%1").arg(uniq.size())
@@ -180,14 +187,13 @@ static void logEnabledObjectives(const GearOptConfig& cfg,
     }
 }
 
-static Population populationFromValidatedSamples(const QVector<SurrogateSample>& samples)
+static Population populationFromValidatedSamples(const QVector<SurrogateSample>& samples,
+                                                 const GearOptConfig& cfg)
 {
     Population pop;
     pop.reserve(samples.size());
     for (const SurrogateSample& s : samples) {
-        if (s.cpressMax <= 0.0 || !std::isfinite(s.cpressMax)
-            || s.edgeLoadRatio <= 0.0 || !std::isfinite(s.edgeLoadRatio)
-            || s.cpressCV <= 0.0 || !std::isfinite(s.cpressCV))
+        if (!isValidSurrogateTrainingSample(s, cfg))
             continue;
         Individual ind;
         ind.objs.append(s.cpressMax);
@@ -249,16 +255,17 @@ static QString sampleDesignSummary(const SurrogateSample& s)
 
 static void logBestRealSoFar(const QVector<SurrogateSample>& samples,
                              int round,
+                             const GearOptConfig& cfg,
                              const std::function<void(const QString&)>& emitLog)
 {
     const SurrogateSample* bestCpress = nullptr;
     const SurrogateSample* bestSigma = nullptr;
     for (const SurrogateSample& s : samples) {
-        if (s.cpressMax > 0.0
-            && (!bestCpress || s.cpressMax < bestCpress->cpressMax))
+        if (!isValidSurrogateTrainingSample(s, cfg))
+            continue;
+        if (!bestCpress || s.cpressMax < bestCpress->cpressMax)
             bestCpress = &s;
-        if (s.sigmaMax > 0.0
-            && (!bestSigma || s.sigmaMax < bestSigma->sigmaMax))
+        if (s.sigmaMax > 0.0 && (!bestSigma || s.sigmaMax < bestSigma->sigmaMax))
             bestSigma = &s;
     }
 
@@ -366,6 +373,28 @@ void GearAutoOptManager::evaluatePopulationByCcx(
         GearDesignPoint dp = ind.toDesignPoint(i, generation);
 
         checkGearOptDesignPointBounds(dp, _cfg);
+
+        QString reliefReason;
+        if (!validateReliefDesign(dp, &reliefReason)) {
+            logInvalidReliefDesign(dp, reliefReason);
+            dp.status   = PointStatus::Infeasible;
+            dp.errorMsg = reliefReason;
+            dp.runId    = _runId;
+            dp.rank     = ind.rank;
+            dp.crowdingDistance = ind.crowdingDist;
+            dp.isPareto = (ind.rank == 1) ? 1 : 0;
+            const int nObj = primaryObjectiveCount(_cfg) + (_cfg.objectives.minRatioErr ? 1 : 0);
+            ind.objs                  = QVector<double>(nObj, 1e8);
+            ind.constraintViolation   = 1.0;
+            ind.evaluated             = true;
+            genPoints.append(dp);
+            emit pointFinished(generation, i, dp);
+            if (pointCallback)
+                pointCallback(i, dp, false);
+            emit log(QString("[gen%1/%2] id=%3 skipped invalid relief status=infeasible")
+                         .arg(generation).arg(_cfg.nsga2.maxGenerations).arg(i));
+            continue;
+        }
 
         const QString workDir = QString("%1/%2_%3")
             .arg(_runDir).arg(generation).arg(i);
@@ -608,6 +637,28 @@ void GearAutoOptManager::evaluateInfillByCcxParallel(
                                     .arg(_runDir)
                                     .arg(generation)
                                     .arg(i);
+
+        QString reliefReason;
+        if (!validateReliefDesign(dp, &reliefReason)) {
+            logInvalidReliefDesign(dp, reliefReason);
+            dp.status   = PointStatus::Infeasible;
+            dp.errorMsg = reliefReason;
+            dp.runDir   = workDir;
+            dp.runId    = _runId;
+            dp.rank     = ind.rank;
+            dp.crowdingDistance = ind.crowdingDist;
+            dp.isPareto = (ind.rank == 1) ? 1 : 0;
+            prep.ind    = ind;
+            prep.dp     = dp;
+            prep.caseHash = GearOptResultDatabase::caseHash(dp);
+            prep.workDir  = workDir;
+            prep.skippedByCache = false;
+            if (summary)
+                summary->cacheHitByIndex[i] = false;
+            preps.append(prep);
+            continue;
+        }
+
         QDir().mkpath(workDir);
         dp.runDir = workDir;
 
@@ -679,7 +730,7 @@ void GearAutoOptManager::evaluateInfillByCcxParallel(
         out.dp              = prep.dp;
         out.skippedByCache  = prep.skippedByCache;
         outcomes[prep.index] = out;
-        if (!prep.skippedByCache)
+        if (!prep.skippedByCache && prep.dp.status != PointStatus::Infeasible)
             runQueue.append(prep.index);
     }
 
@@ -861,6 +912,29 @@ void GearAutoOptManager::evaluatePopulationBySurrogate(Population& pop,
         dp.rank = ind.rank;
         dp.crowdingDistance = ind.crowdingDist;
         dp.isPareto = (ind.rank == 1) ? 1 : 0;
+
+        QString reliefReason;
+        if (!validateReliefDesign(dp, &reliefReason)) {
+            logInvalidReliefDesign(dp, reliefReason);
+            ind.objs.clear();
+            ind.objs.append(kEdgePenalty);
+            ind.objs.append(kEdgePenalty);
+            ind.evaluated = true;
+            ind.constraintViolation = 1.0;
+            if (ind.vars.size() < VAR_COUNT)
+                ind.vars.resize(VAR_COUNT);
+            ind.vars[VAR_CA1]  = dp.ca1;
+            ind.vars[VAR_LCA1] = dp.lca1;
+            ind.vars[VAR_CA2]  = dp.ca2;
+            ind.vars[VAR_LCA2] = dp.lca2;
+            continue;
+        }
+        if (ind.vars.size() < VAR_COUNT)
+            ind.vars.resize(VAR_COUNT);
+        ind.vars[VAR_CA1]  = dp.ca1;
+        ind.vars[VAR_LCA1] = dp.lca1;
+        ind.vars[VAR_CA2]  = dp.ca2;
+        ind.vars[VAR_LCA2] = dp.lca2;
 
         const SurrogatePrediction pred = model.predict(surrogateInputVars(dp));
         ind.objs.clear();
@@ -1097,7 +1171,7 @@ void GearAutoOptManager::startSurrogateAssisted()
                  .arg(baseCountGlobal));
 
     QVector<SurrogateSample> samples =
-        loadMergedValidatedSamples(baseCaseH, _fixedCommonWidthMm);
+        loadMergedValidatedSamples(baseCaseH, _fixedCommonWidthMm, _cfg);
     emit log(QStringLiteral("[GearOpt][Surrogate] merged validated samples (width=%1 mm): %2")
                  .arg(_fixedCommonWidthMm, 0, 'g', 6)
                  .arg(samples.size()));
@@ -1132,7 +1206,7 @@ void GearAutoOptManager::startSurrogateAssisted()
             if (_stopRequested)
                 return false;
 
-            samples = loadMergedValidatedSamples(baseCaseH, _fixedCommonWidthMm);
+            samples = loadMergedValidatedSamples(baseCaseH, _fixedCommonWidthMm, _cfg);
             const int newValidated = std::max(0, samples.size() - before);
             const int duplicateOrFailed = std::max(0, batchN - newValidated - supplementStats.reusedCacheCount);
             emit log(QStringLiteral("[GearOpt][Surrogate] LHS supplement result: new_validated=%1 cache_hit=%2 duplicate_or_failed=%3 total=%4/%5")
@@ -1219,6 +1293,10 @@ void GearAutoOptManager::startSurrogateAssisted()
                          .arg(edgeMax, 0, 'g', 6)
                          .arg(looEdge >= 0.0 ? looEdge * 100.0 : -1.0, 0, 'g', 4)
                          .arg(looCpress >= 0.0 ? looCpress * 100.0 : -1.0, 0, 'g', 4));
+            if (looEdge >= 0.10) {
+                emit log(QStringLiteral(
+                    "[Surrogate] warning: edgeLoadRatio surrogate error is high; final ranking requires CCX validation."));
+            }
         }
 
         const QVector<double> sampleResiduals =
@@ -1335,6 +1413,35 @@ void GearAutoOptManager::startSurrogateAssisted()
                 infill += fallback;
             }
         }
+
+        {
+            Population validInfill;
+            validInfill.reserve(infill.size());
+            for (const Individual& ind : infill) {
+                GearDesignPoint dp = ind.toDesignPoint();
+                if (_cfg.useOptimizationBase) {
+                    dp.module = baseDp.module;
+                    dp.z1     = baseDp.z1;
+                    dp.z2     = baseDp.z2;
+                    dp.alpha  = baseDp.alpha;
+                }
+                dp.commonWidth = _fixedCommonWidthMm;
+                applySurrogateInputVars(dp, surrogateInputVars(dp));
+                QString reliefReason;
+                if (!validateReliefDesign(dp, &reliefReason)) {
+                    logInvalidReliefDesign(dp, reliefReason);
+                    continue;
+                }
+                validInfill.append(ind);
+            }
+            if (validInfill.size() != infill.size()) {
+                emit log(QStringLiteral("[GearOpt][Surrogate] round %1: filtered %2 invalid relief infill candidates")
+                             .arg(round)
+                             .arg(infill.size() - validInfill.size()));
+            }
+            infill = validInfill;
+        }
+
         if (infill.isEmpty()) {
             emit log(QStringLiteral("[GearOpt][Surrogate] no non-duplicate sparse infill points; stop"));
             break;
@@ -1405,6 +1512,8 @@ void GearAutoOptManager::startSurrogateAssisted()
         auto appendPredVsTrue = [&](int pointIndex, const GearDesignPoint& dp, bool cached) {
             Q_UNUSED(cached);
             if (pointIndex < 0 || pointIndex >= predCpress.size())
+                return;
+            if (!ccxCaseConverged(_cfg, dp))
                 return;
             if (dp.status != PointStatus::Done || dp.cpressMax_MPa <= 0.0)
                 return;
@@ -1477,10 +1586,10 @@ void GearAutoOptManager::startSurrogateAssisted()
         const double rmaeSigmaNew  = computeRmae(predSigmaNew, trueSigmaNew);
         const double rmaeU         = computeRmae(predUAll, trueUAll);
 
-        samples = loadMergedValidatedSamples(baseCaseH, _fixedCommonWidthMm);
-        logBestRealSoFar(samples, round, [this](const QString& msg) { emit log(msg); });
+        samples = loadMergedValidatedSamples(baseCaseH, _fixedCommonWidthMm, _cfg);
+        logBestRealSoFar(samples, round, _cfg, [this](const QString& msg) { emit log(msg); });
 
-        const Population ccxPop = populationFromValidatedSamples(samples);
+        const Population ccxPop = populationFromValidatedSamples(samples, _cfg);
         const Population ccxPareto = extractPareto(ccxPop);
         const auto ccxParetoMax = paretoObjectiveMax(ccxPareto);
         const HypervolumeReference2D ccxHvRef = computeDynamicHypervolumeReference(

@@ -127,6 +127,37 @@ Individual Individual::fromDesignPoint(const GearDesignPoint& dp, const GearOptC
 // 修复 + 约束评估（先于采样使用，所以放在前面）
 // ================================================================
 
+static void syncReliefVarsToIndividual(Individual& ind, const GearDesignPoint& dp)
+{
+    if (ind.vars.size() < VAR_COUNT)
+        ind.vars.resize(VAR_COUNT);
+    ind.vars[VAR_CA1]  = dp.ca1;
+    ind.vars[VAR_LCA1] = dp.lca1;
+    ind.vars[VAR_CA2]  = dp.ca2;
+    ind.vars[VAR_LCA2] = dp.lca2;
+}
+
+static void repairReliefSampling(Individual& ind, const QVector<Bounds>& bv)
+{
+    if (ind.vars.size() < VAR_COUNT)
+        ind.vars.resize(VAR_COUNT);
+
+    auto fixPair = [&](int iCa, int iLca) {
+        double& ca  = ind.vars[iCa];
+        double& lca = ind.vars[iLca];
+        if (ca <= kCaEps) {
+            ca  = 0.0;
+            lca = 0.0;
+            return;
+        }
+        if (lca < kMinReliefLength)
+            lca = snapBounds(kMinReliefLength, bv[iLca]);
+    };
+
+    fixPair(VAR_CA1, VAR_LCA1);
+    fixPair(VAR_CA2, VAR_LCA2);
+}
+
 void repairAndEval(Individual& ind, const GearOptConfig& cfg) {
     if (ind.vars.size() < VAR_COUNT) ind.vars.resize(VAR_COUNT);
     const QVector<Bounds> bv = boundsVector(cfg);
@@ -135,8 +166,20 @@ void repairAndEval(Individual& ind, const GearOptConfig& cfg) {
     for (int i = 0; i < VAR_COUNT; ++i)
         ind.vars[i] = snapBounds(ind.vars[i], bv[i]);
 
-    // 2. 求几何可行性（toDesignPoint → isFeasible）
+    // 1b. 修形采样耦合：ca≈0 → lca=0；ca>0 → lca≥0.1 mm
+    repairReliefSampling(ind, bv);
+
+    // 2. 修形合法性 + 几何可行性
     GearDesignPoint dp = ind.toDesignPoint();
+    QString reliefReason;
+    if (!validateReliefDesign(dp, &reliefReason)) {
+        logInvalidReliefDesign(dp, reliefReason);
+        syncReliefVarsToIndividual(ind, dp);
+        ind.constraintViolation = 1.0;
+        return;
+    }
+    syncReliefVarsToIndividual(ind, dp);
+
     QString msg;
     const bool feasible = dp.isFeasible(&msg);
 

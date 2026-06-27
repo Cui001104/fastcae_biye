@@ -90,9 +90,9 @@ QVector<DesignVariableDefinition> defaultDesignVariableDefinitions()
 	add("x1", "主动轮变位系数", "-", -0.5, 0.5, true, "gear", "齿轮几何参数");
 	add("x2", "从动轮变位系数", "-", -0.5, 0.5, true, "gear");
 	add("ca1", "主动轮齿廓修形量", "mm", 0.00, 0.05, true, "gear");
-	add("lca1", "主动轮修形长度", "mm", 0.10, 0.80, true, "gear");
+	add("lca1", "主动轮修形长度", "mm", 0.10, 0.80, true, "gear", "ca1=0 时自动置 0；ca1>0 时≥0.1 mm");
 	add("ca2", "从动轮齿廓修形量", "mm", 0.00, 0.05, true, "gear");
-	add("lca2", "从动轮修形长度", "mm", 0.10, 0.80, true, "gear");
+	add("lca2", "从动轮修形长度", "mm", 0.10, 0.80, true, "gear", "ca2=0 时自动置 0；ca2>0 时≥0.1 mm");
 	add("commonWidth", "齿宽", "mm", 8.00, 14.00, true, "gear");
 	add("hubRatio", "轮毂比", "-", 0.30, 0.60, true, "gear");
 

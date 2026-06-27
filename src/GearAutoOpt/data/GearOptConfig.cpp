@@ -67,9 +67,9 @@ GearOptConfig GearOptConfig::defaultConfig()
 	c.x2Bound.lower = -0.3; c.x2Bound.upper = 0.6;
 
 	c.ca1Bound.lower  = 0.0; c.ca1Bound.upper  = 0.35;
-	c.lca1Bound.lower = 0.0; c.lca1Bound.upper = 8.0;   // 后续由 module 缩放
+	c.lca1Bound.lower = 0.1; c.lca1Bound.upper = 8.0;   // ca>0 时有效；ca=0 时由 validateReliefDesign 归一化 lca=0
 	c.ca2Bound.lower  = 0.0; c.ca2Bound.upper  = 0.35;
-	c.lca2Bound.lower = 0.0; c.lca2Bound.upper = 8.0;
+	c.lca2Bound.lower = 0.1; c.lca2Bound.upper = 8.0;
 
 	c.widthBound.lower    = 10.0; c.widthBound.upper    = 30.0;
 	c.hubRatioBound.lower = 0.3;  c.hubRatioBound.upper = 0.5;
@@ -229,7 +229,7 @@ GearOptConfig GearOptConfig::fromBasePoint(const GearDesignPoint& basePoint, con
 	const double gXLo = -0.3, gXHi = 0.6;
 	const double gCaLo = def.ca1Bound.lower;
 	const double gCaHi = def.ca1Bound.upper;
-	const double gLcaLo = 0.0, gLcaHi = 8.0;
+	const double gLcaLo = 0.1, gLcaHi = 8.0;
 	const double gWLo = 10.0, gWHi = 30.0;
 	const double gHLo = 0.3, gHHi = 0.5;
 

@@ -167,7 +167,8 @@ bool GearSurrogateModel::train(const QVector<SurrogateSample>& samples)
 
 	for (const SurrogateSample& s : samples) {
 		if (s.x.isEmpty() || s.cpressMax <= 0.0 || !std::isfinite(s.cpressMax)
-		    || s.edgeLoadRatio <= 0.0 || !std::isfinite(s.edgeLoadRatio))
+		    || s.edgeLoadRatio <= 0.0 || !std::isfinite(s.edgeLoadRatio)
+		    || s.cpressCV <= 0.0 || !std::isfinite(s.cpressCV))
 			continue;
 		if (_dim == 0)
 			_dim = s.x.size();

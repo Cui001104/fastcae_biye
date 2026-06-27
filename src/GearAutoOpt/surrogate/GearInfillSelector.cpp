@@ -203,6 +203,11 @@ Population selectImpl(const Population& surrogatePareto,
 			dp = designPointForCaseHash(ind, *cfg, *basePoint, fixedMeshSizeMm, runMeshAuto,
 			                            basePoint->commonWidth);
 		}
+		QString reliefReason;
+		if (!validateReliefDesign(dp, &reliefReason)) {
+			logInvalidReliefDesign(dp, reliefReason);
+			continue;
+		}
 		const QVector<double> xNorm = normalizeByBounds(surrogateInputVars(dp), lo, hi);
 		const double distExisting = minNormalizedDistanceTo(xNorm, existingNorm);
 		if (!existingNorm.isEmpty() && distExisting < minDesignDist) {
@@ -298,6 +303,11 @@ Population selectImpl(const Population& surrogatePareto,
 		if (cfg && basePoint) {
 			candDp = designPointForCaseHash(si.ind, *cfg, *basePoint, fixedMeshSizeMm, runMeshAuto,
 			                                basePoint->commonWidth);
+		}
+		QString reliefReason;
+		if (!validateReliefDesign(candDp, &reliefReason)) {
+			logInvalidReliefDesign(candDp, reliefReason);
+			continue;
 		}
 		const QVector<double> candNorm =
 		    normalizeByBounds(surrogateInputVars(candDp), lo, hi);

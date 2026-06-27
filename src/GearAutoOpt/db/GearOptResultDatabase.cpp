@@ -883,7 +883,14 @@ QVector<SurrogateSample> GearOptResultDatabase::loadValidatedSamples(const QStri
 		const double lca2 = query.value(col++).toDouble();
 		Q_UNUSED(query.value(col++).toDouble()); // width：baseCase 固定，不入 RBF 输入
 		const double hubRatio = query.value(col++).toDouble();
-		s.x = { x1, x2, ca1, lca1, ca2, lca2, hubRatio };
+		GearDesignPoint reliefCheck;
+		reliefCheck.ca1  = ca1;
+		reliefCheck.lca1 = lca1;
+		reliefCheck.ca2  = ca2;
+		reliefCheck.lca2 = lca2;
+		if (!validateReliefDesign(reliefCheck))
+			continue;
+		s.x = { x1, x2, reliefCheck.ca1, reliefCheck.lca1, reliefCheck.ca2, reliefCheck.lca2, hubRatio };
 		s.designHash = query.value(col++).toString();
 	s.caseHash   = query.value(col++).toString().trimmed();
 	s.cpressMax  = query.value(col++).toDouble();

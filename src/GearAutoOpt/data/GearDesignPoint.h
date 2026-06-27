@@ -13,6 +13,11 @@ namespace GearAutoOpt {
 
 class GearOptConfig;
 
+/// 齿顶修形量低于此阈值视为关闭修形。
+constexpr double kCaEps = 1e-6;
+/// 启用修形时修形长度下限 [mm]。
+constexpr double kMinReliefLength = 0.1;
+
 /// 工况状态。
 enum class PointStatus {
 	Pending = 0,    ///< 待求解
@@ -147,6 +152,13 @@ struct GEARAUTOOPTAPI GearDesignPoint {
 	/// 若返回 false，msg 写入失败原因。
 	bool isFeasible(QString* msg = nullptr) const;
 };
+
+/// 修形变量合法性：ca≈0 时强制 lca=0；ca>0 时要求 lca≥kMinReliefLength。
+/// 返回 false 时 reason 写入原因；p 中已关闭的修形会被归一化为 ca=lca=0。
+GEARAUTOOPTAPI bool validateReliefDesign(GearDesignPoint& p, QString* reason = nullptr);
+
+/// 统一输出无效修形跳过日志。
+GEARAUTOOPTAPI void logInvalidReliefDesign(const GearDesignPoint& p, const QString& reason);
 
 } // namespace GearAutoOpt
 
