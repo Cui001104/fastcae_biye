@@ -1,11 +1,18 @@
 #include "CCXSolverController.h"
+#include "CCXInpWriter.h"
+#include "GearAutoOpt/data/GearLogLevel.h"
+#include "GearAutoOpt/data/GearOptLog.h"
 
 #include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
+#include <QRegularExpression>
 #include <QString>
 #include <QStringList>
+#include <QThread>
 #include <QTimer>
+
+#include <algorithm>
 
 namespace GearAutoOpt {
 
@@ -35,8 +42,8 @@ CCXFailureReason classifyLine(const QString& line) {
 		return CCXFailureReason::NegativeJacobian;
 	if (lower.contains(QLatin1String("singular")))
 		return CCXFailureReason::SingularMatrix;
-	if (lower.contains(QLatin1String("no convergence"))
-	    || lower.contains(QLatin1String("did not converge"))
+	// "no convergence" 在 NR 中间迭代中常见，最终成败由 onProcessFinished 结合 _newtonConverged 判定。
+	if (lower.contains(QLatin1String("did not converge"))
 	    || lower.contains(QLatin1String("diverged")))
 		return CCXFailureReason::NoConvergence;
 	if (lower.contains(QLatin1String("*error")) || lower.contains(QLatin1String(" error in")))
@@ -88,6 +95,45 @@ bool CCXSolverController::isRunning() const {
 	return _proc && _proc->state() != QProcess::NotRunning;
 }
 
+int CCXSolverController::defaultThreadCount() {
+	int n = QThread::idealThreadCount();
+	if (n <= 0)
+		n = 4;
+	return std::clamp(n, 1, 16);
+}
+
+namespace {
+
+void parseStdoutStatsLine(const QString& line, CCXSolveSummary* s) {
+	if (!s)
+		return;
+	const QString t = line.trimmed();
+	static QRegularExpression rxNodes(QStringLiteral(R"(^\s*nodes:\s*(\d+))"), QRegularExpression::CaseInsensitiveOption);
+	static QRegularExpression rxElems(QStringLiteral(R"(^\s*elements:\s*(\d+))"), QRegularExpression::CaseInsensitiveOption);
+	static QRegularExpression rxEq(QStringLiteral(R"(^\s*(\d+)\s*$)"));
+	static QRegularExpression rxCpu(QStringLiteral(R"(Using up to (\d+) cpu)"), QRegularExpression::CaseInsensitiveOption);
+
+	auto m = rxNodes.match(t);
+	if (m.hasMatch()) {
+		s->nodes = m.captured(1).toInt();
+		return;
+	}
+	m = rxElems.match(t);
+	if (m.hasMatch()) {
+		s->elements = m.captured(1).toInt();
+		return;
+	}
+	m = rxCpu.match(t);
+	if (m.hasMatch()) {
+		s->usedThreads = m.captured(1).toInt();
+		return;
+	}
+	if (t.startsWith(QLatin1String("increment "), Qt::CaseInsensitive))
+		++s->incrementCount;
+}
+
+} // anonymous namespace
+
 bool CCXSolverController::start() {
 	if (isRunning()) return false;
 
@@ -100,31 +146,64 @@ bool CCXSolverController::start() {
 	const QString inp = QDir(_workDir).filePath(_jobName + ".inp");
 	if (!QFileInfo::exists(inp)) return false;
 
+	const QStringList rigidLines = inpRigidBodyKeywordLines(inp);
+	if (!rigidLines.isEmpty() && GearOptLog::isDebug()) {
+		GEAR_OPT_DEBUG_NOQUOTE << QStringLiteral("ccx preflight: job.inp *RIGID BODY lines from disk (%1):").arg(inp);
+		for (const QString& raw : rigidLines)
+			GEAR_OPT_DEBUG_NOQUOTE << QStringLiteral("  |%1|").arg(raw);
+	}
+	const QStringList couplingLines = inpCouplingKeywordLines(inp);
+	if (!couplingLines.isEmpty() && GearOptLog::isDebug()) {
+		GEAR_OPT_DEBUG_NOQUOTE << QStringLiteral("ccx preflight: job.inp *COUPLING lines from disk (%1):").arg(inp);
+		for (const QString& raw : couplingLines)
+			GEAR_OPT_DEBUG_NOQUOTE << QStringLiteral("  |%1|").arg(raw);
+		const QString spacingErr = verifyInpCouplingKeywordSpacing(inp);
+		if (!spacingErr.isEmpty())
+			GEAR_OPT_DEBUG_NOQUOTE << QStringLiteral("ccx preflight: WARNING %1").arg(spacingErr);
+	}
+
+	if (!_outputLogPath.isEmpty())
+		GearOptLog::writeText(_outputLogPath, QString());
+
 	_killedByTimeout = false;
 	_stdoutBuf.clear();
 	_stderrBuf.clear();
 	_detectedReason = CCXFailureReason::None;
 	_firstErrorLine.clear();
+	_newtonConverged = false;
+	_jobFinished     = false;
+	_summary         = CCXSolveSummary{};
+
+	const int threadCount = (_threads > 0) ? _threads : defaultThreadCount();
 
 	_proc->setWorkingDirectory(_workDir);
-	// 注入 OMP_NUM_THREADS（_threads==0 表示不覆盖，跟随系统默认）
-	if (_threads > 0) {
-		QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
-		env.insert(QStringLiteral("OMP_NUM_THREADS"), QString::number(_threads));
-		_proc->setProcessEnvironment(env);
-	}
-	_proc->start(_exePath, QStringList{ _jobName });
+	QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+	env.insert(QStringLiteral("OMP_NUM_THREADS"), QString::number(threadCount));
+	_proc->setProcessEnvironment(env);
+
+	QStringList args;
+	args << QStringLiteral("-i") << _jobName << QStringLiteral("-t") << QString::number(threadCount);
+	_proc->start(_exePath, args);
 	if (!_proc->waitForStarted(5000)) return false;
 
 	if (_timeoutSec > 0) {
 		_timer->start(_timeoutSec * 1000);
 	}
 	emit started(_proc->processId());
-	emit sendMessage(QString("ccx started: pid=%1, job=%2, dir=%3")
-	                 .arg(_proc->processId())
-	                 .arg(_jobName)
-	                 .arg(_workDir));
+	if (GearOptLog::isDebug()) {
+		GEAR_OPT_DEBUG << QString("ccx started: pid=%1, job=%2, dir=%3, args=-i %4 -t %5")
+		                    .arg(_proc->processId())
+		                    .arg(_jobName)
+		                    .arg(_workDir)
+		                    .arg(_jobName)
+		                    .arg(threadCount);
+	}
 	return true;
+}
+
+void CCXSolverController::appendOutputLogLine(const QString& line) {
+	if (!_outputLogPath.isEmpty())
+		GearOptLog::appendLine(_outputLogPath, line);
 }
 
 void CCXSolverController::stop(bool wait) {
@@ -143,6 +222,25 @@ void CCXSolverController::drainAndEmit(QByteArray& buffer, bool isErr) {
 		}
 		buffer.remove(0, idx + 1);
 		const QString line = QString::fromLocal8Bit(lineBytes);
+		const QString lower = line.toLower();
+
+		parseStdoutStatsLine(line, &_summary);
+		if (lower.contains(QLatin1String("number of equations")))
+			_summary.equations = -2; // 下一行数字
+
+		if (_summary.equations == -2) {
+			bool ok = false;
+			const int eq = line.trimmed().toInt(&ok);
+			if (ok && eq > 0)
+				_summary.equations = eq;
+		}
+
+		if (lower.contains(QLatin1String("no convergence")))
+			_newtonConverged = false;
+		else if (lower.contains(QLatin1String("convergence")))
+			_newtonConverged = true;
+		if (lower.contains(QLatin1String("job finished")))
+			_jobFinished = true;
 
 		// 记录最严重的失败原因；第一行 *ERROR 留底供上层显示。
 		const CCXFailureReason hit = classifyLine(line);
@@ -153,7 +251,7 @@ void CCXSolverController::drainAndEmit(QByteArray& buffer, bool isErr) {
 			}
 		}
 
-		emit sendMessage(QString(isErr ? "[stderr] " : "[stdout] ") + line);
+		appendOutputLogLine(line);
 	}
 }
 
@@ -174,12 +272,28 @@ void CCXSolverController::onProcessFinished(int code, QProcess::ExitStatus statu
 	auto flushTail = [&](QByteArray& buf, bool isErr) {
 		if (buf.isEmpty()) return;
 		const QString line = QString::fromLocal8Bit(buf);
+		const QString lower = line.toLower();
+		parseStdoutStatsLine(line, &_summary);
+		if (lower.contains(QLatin1String("number of equations")))
+			_summary.equations = -2;
+		if (_summary.equations == -2) {
+			bool ok = false;
+			const int eq = line.trimmed().toInt(&ok);
+			if (ok && eq > 0)
+				_summary.equations = eq;
+		}
+		if (lower.contains(QLatin1String("no convergence")))
+			_newtonConverged = false;
+		else if (lower.contains(QLatin1String("convergence")))
+			_newtonConverged = true;
+		if (lower.contains(QLatin1String("job finished")))
+			_jobFinished = true;
 		const CCXFailureReason hit = classifyLine(line);
 		if (hit != CCXFailureReason::None) {
 			_detectedReason = worse(_detectedReason, hit);
 			if (_firstErrorLine.isEmpty()) _firstErrorLine = line.trimmed();
 		}
-		emit sendMessage(QString(isErr ? "[stderr] " : "[stdout] ") + line);
+		appendOutputLogLine(line);
 		buf.clear();
 	};
 	flushTail(_stdoutBuf, false);
@@ -189,6 +303,14 @@ void CCXSolverController::onProcessFinished(int code, QProcess::ExitStatus statu
 
 	// 综合判定最终原因（按优先级递增覆盖）
 	CCXFailureReason finalReason = _detectedReason;
+	// 接触/非线性 NR：中间迭代会打印 no convergence，以最后一次 convergence 为准。
+	if (_jobFinished && finalCode == 0 && _newtonConverged
+	    && finalReason == CCXFailureReason::NoConvergence) {
+		finalReason = CCXFailureReason::None;
+	}
+	if (finalReason == CCXFailureReason::None && finalCode == 0 && _jobFinished && !_newtonConverged) {
+		finalReason = CCXFailureReason::NoConvergence;
+	}
 	if (status == QProcess::CrashExit) {
 		finalReason = worse(finalReason, CCXFailureReason::Crash);
 	}
@@ -200,13 +322,29 @@ void CCXSolverController::onProcessFinished(int code, QProcess::ExitStatus statu
 		finalReason = CCXFailureReason::ExitNonZero;
 	}
 
+	const int threadsUsed = (_threads > 0) ? _threads : defaultThreadCount();
+	if (_summary.usedThreads < 0)
+		_summary.usedThreads = threadsUsed;
+
+	if (GearOptLog::isDebug()) {
+		GEAR_OPT_DEBUG_NOQUOTE << QStringLiteral("ccx summary: nodes=%1 elements=%2 equations=%3 increments=%4 threads=%5")
+		                              .arg(_summary.nodes)
+		                              .arg(_summary.elements)
+		                              .arg(_summary.equations)
+		                              .arg(_summary.incrementCount)
+		                              .arg(_summary.usedThreads);
+	}
+
 	emit processFinish(finalCode, finalReason, _firstErrorLine);
 }
 
 void CCXSolverController::onTimeout() {
 	_killedByTimeout = true;
-	emit sendMessage(QString("ccx timeout after %1s, killing pid=%2")
-	                 .arg(_timeoutSec).arg(pid()));
+	if (GearOptLog::isDebug()) {
+		GEAR_OPT_DEBUG << QString("ccx timeout after %1s, killing pid=%2")
+		                    .arg(_timeoutSec)
+		                    .arg(pid());
+	}
 	if (isRunning()) _proc->kill();
 }
 
@@ -234,7 +372,7 @@ QStringList projectRelativeCandidates() {
 		for (int up = 0; up <= 4; ++up) {
 			QString prefix = base;
 			for (int i = 0; i < up; ++i) prefix += "/..";
-			list << prefix + "/tools/calculix/ccx.exe";
+			list << prefix + "/tools/calculix/ccx_MT.exe";
 		}
 	};
 	addLayout(appDir);

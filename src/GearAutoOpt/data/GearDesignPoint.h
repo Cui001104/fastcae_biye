@@ -11,6 +11,8 @@ class QJsonObject;
 
 namespace GearAutoOpt {
 
+class GearOptConfig;
+
 /// 工况状态。
 enum class PointStatus {
 	Pending = 0,    ///< 待求解
@@ -27,8 +29,9 @@ GEARAUTOOPTAPI PointStatus pointStatusFromString(const QString& s);
 /// 一行对应 SQLite design_points 表中一条记录。
 struct GEARAUTOOPTAPI GearDesignPoint {
 	// ---- 数据库主键 ----
-	int       id = -1;            ///< -1 = 未入库
-	int       generation = 0;     ///< 优化代数；0 = 初始采样
+	int       id = -1;            ///< 本代个体序号 individual_id；-1 = 未赋值
+	int       generation = 0;     ///< 优化代数 gen
+	QString   runId;              ///< 本次优化 run_id（同一次优化共用）
 	QList<int> parentIds;         ///< 来源父代 id（NSGA-II 交叉时填写）
 
 	// ---- 设计变量 ----
@@ -42,21 +45,93 @@ struct GEARAUTOOPTAPI GearDesignPoint {
 	double lca1        = 0.0;     ///< 主齿轮齿顶修型长度 [mm]
 	double ca2         = 0.0;     ///< 副齿轮齿顶修型量 [mm]
 	double lca2        = 0.0;     ///< 副齿轮齿顶修型长度 [mm]
-	double width       = 10.0;    ///< 齿宽 b [mm]
+	double commonWidth = 10.0;    ///< 齿轮副公共齿宽 b [mm]（GEAR1/GEAR2 相同）
 	double hubRatio    = 0.4;     ///< 轮毂内径 / 分度圆直径
+	double addendumCoeff   = 1.0;   ///< 齿顶高系数 ha*
+	double dedendumCoeff   = 1.25;  ///< 齿根高系数 hf*
+	double rootFilletCoeff = 0.38;  ///< 齿根圆角系数
+
+	// ---- 仿真配置（与单次 run 的网格/材料/接触/求解器一致，便于结果可比）----
+	double   meshSize_mm     = 0.0;   ///< Gmsh 全局尺寸；0 表示自动（0.5×module）
+	bool     meshAuto        = true;
+	QString  meshMethod      = QStringLiteral("gmsh");
+	int      elementOrder    = 1;
+	int      nodeCount       = 0;
+	int      elementCount    = 0;
+	double   torque_Nm       = 100.0;
+	double   contactStiffness = 500.0;
+	bool     enableContact   = false;
+	QString  contactType     = QStringLiteral("surface_to_surface_penalty");
+	double   frictionCoeff   = 0.0; ///< 预留，当前无摩擦 penalty contact
+	QString  materialName    = QStringLiteral("STEEL");
+	double   youngModulus_MPa = 206000.0;
+	double   poissonRatio    = 0.30;
+	double   density         = 7.85e-9; ///< [t/mm^3]
+	QString  solverPath;
+	QString  solverVersion;       ///< 可选，ccx 版本字符串
+	QString  staticStep        = QStringLiteral("STATIC");
+	QString  meshInpPath;
+	QString  jobInpPath;
+	QString  datPath;
+	QString  frdPath;
+
+	// ---- 优化标记（入库 / CSV）----
+	int    isPareto           = 0;
+	int    rank               = 0;
+	double crowdingDistance   = 0.0;
 
 	// ---- 工况状态 ----
 	PointStatus status = PointStatus::Pending;
 	QString  errorMsg;            ///< Failed/Infeasible 时的原因
 	QString  runDir;              ///< 求解工作目录绝对路径，如 runs/0_42/
 
-	// ---- 求解响应 ----
-	double sigmaMax    = -1.0;    ///< 齿根最大 von Mises [MPa]，-1 表示未求解
-	double uMax        = -1.0;    ///< 最大位移 [mm]
-	double mass        = -1.0;    ///< 主齿轮质量 [kg]
+	// ---- 求解响应（兼容字段 = total）----
+	double sigmaMax    = -1.0;    ///< ≡ sigmaMax_total [MPa]，最终步 von Mises max
+	double uMax        = -1.0;    ///< ≡ uMax_total [mm]
+	double mass        = -1.0;    ///< ≡ mass_total [kg]
+
+	double sigmaMax_total = -1.0;
+	double sigmaMax_gear1 = -1.0;
+	double sigmaMax_gear2 = -1.0;
+	int    sigmaMax_gear1_elem = -1;
+	int    sigmaMax_gear1_ip   = -1;
+	int    sigmaMax_gear2_elem = -1;
+	int    sigmaMax_gear2_ip   = -1;
+	double uMax_total     = -1.0;
+	double uMax_gear1     = -1.0;
+	double uMax_gear2     = -1.0;
+	double mass_total     = -1.0;
+	double mass_gear1     = -1.0;
+	double mass_gear2     = -1.0;
+
+	/// 最终 Step/Increment 的齿面接触压力 CPRESS 最大值 [MPa]；NSGA-II 主目标之一。
+	double cpressMax_MPa  = -1.0;
+	double cpressMean_MPa       = -1.0;
+	double cpressStd_MPa        = -1.0;
+	double cpressCV             = -1.0;
+	double contactWidth_mm      = -1.0;
+	double edgeLoadRatio        = -1.0;
+	double cpressEdgeMean_MPa   = -1.0;
+	double cpressCenterMean_MPa = -1.0;
+	int    cpressActiveNodes    = 0;
+	int    cpressBinCount       = 0;
+
+	/// 将分齿轮结果汇总到 *_total，并回填 sigmaMax/uMax/mass 兼容字段。
+	void syncLegacyResultFields();
+
+	/// 确保啮合副两齿轮齿宽一致（当前为单字段，供采样/几何前显式调用）。
+	void syncPairGearWidth();
+
+	/// 从 GearOptConfig 与本次 run 固定的网格设置写入仿真配置（不覆盖 nodeCount/elementCount/enableContact）。
+	void applyRunSimDefaults(const GearOptConfig& cfg,
+	                         double fixedMeshSizeMm,
+	                         bool   runMeshAuto);
+
+	/// 根据 runDir 填写 mesh/job/dat/frd 绝对路径（求解后调用）。
+	void fillResultArtifactPaths();
 
 	// ---- 元数据 ----
-	QString  solver = "ccx";      ///< 使用的求解器名
+	QString  solver = QStringLiteral("CalculiX");
 	double   solverTime = -1.0;   ///< 求解 wall time [s]
 	QDateTime createdAt;          ///< 入库时间，构造时填当前时间
 	QDateTime updatedAt;

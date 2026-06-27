@@ -9,6 +9,13 @@ namespace Geometry { class GeometrySet; }
 
 namespace GearAutoOpt {
 
+/// 网格步参数（global / 齿根加密 / 齿宽层数）。
+struct GEARAUTOOPTAPI GearMeshParams {
+	double globalSize = 1.50; ///< Gmsh 全局尺寸 [mm]；0 = 自动 max(0.5×module, meshAutoMinMm)
+	double rootSize   = 0.40; ///< 齿根 Distance+Threshold SizeMin [mm]
+	int    zLayers    = 11;   ///< 齿宽方向 Transfinite 层数；-1 = 按齿宽自动
+};
+
 /// 真实工况编排器：把 GearAutoCaseRunner 的 stub 步骤逐个填实。
 ///
 /// 构造时 MainWindow / PreWindow 传 nullptr，GeoCommandBase 内部已做空指针保护，
@@ -28,8 +35,19 @@ public:
 	/// 探测 gmsh.exe：先读 GMSH_PATH 环境变量，否则 <appDir 多级回溯>/extlib/Gmsh/gmsh.exe。
 	static QString detectGmshPath();
 
-	/// 网格步全局尺寸：默认 0（= 0.5 × module）。
+	/// 网格步全局尺寸 [mm]；默认 1.50（网格无关性方案 B）。
 	void setMeshSize(double s) { _meshSize = s; }
+
+	/// 齿根加密最小尺寸 [mm]；默认 0.40。
+	void setRootMeshSize(double s) { _rootMeshSize = s; }
+
+	/// 齿宽方向层数；默认 11。
+	void setZLayersOverride(int n) { _zLayersOverride = n; }
+
+	void setMeshParams(const GearMeshParams& p);
+
+	/// 与 runMeshStep 相同的齿宽层数公式（clamp(ceil(width/1)+1, 10, 14)）。
+	static int computeAutoZLayers(double widthMm);
 
 	/// CCX 求解线程数（OMP_NUM_THREADS）；0 = 跟随系统默认。
 	void setThreads(int n)     { _threads = n; }
@@ -37,6 +55,8 @@ public:
 	/// 求解配置（材料参数 / 扭矩 / ccx 超时等）。
 	void             setConfig(const GearOptConfig& cfg) { _config = cfg; }
 	const GearOptConfig& config() const { return _config; }
+
+	void runOne(GearDesignPoint& dp) override;
 
 	/// 把本次 run 创建的两 GeometrySet 从全局 GeometryData 中撤销 + 析构。
 	/// 工况编排层在每个设计点求解结束后应调用，避免 in-memory 累积成百上千个临时齿轮。
@@ -54,7 +74,9 @@ private:
 	Geometry::GeometrySet* _set1{nullptr};
 	Geometry::GeometrySet* _set2{nullptr};
 	QString      _gmshPathOverride;
-	double       _meshSize{0.0};
+	double       _meshSize{1.50};
+	double       _rootMeshSize{0.40};
+	int          _zLayersOverride{11};
 	int          _threads{0};
 	GearOptConfig _config;
 };

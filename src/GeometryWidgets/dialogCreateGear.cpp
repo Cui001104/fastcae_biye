@@ -68,6 +68,8 @@ namespace GeometryWidget {
 			_ui->comboBoxGearType->setCurrentIndex(p->isExternalGear() ? 0 : 1);
 			_ui->doubleSpinBoxTipReliefAmount->setValue(p->getTipReliefAmount());
 			_ui->doubleSpinBoxTipReliefLength->setValue(p->getTipReliefLength());
+			_ui->doubleSpinBoxTipReliefAmount2->setValue(p->getTipReliefAmount2());
+			_ui->doubleSpinBoxTipReliefLength2->setValue(p->getTipReliefLength2());
 		}
 	}
 

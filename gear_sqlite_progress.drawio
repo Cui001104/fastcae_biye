@@ -1,0 +1,132 @@
+<mxfile host="65bd71144e">
+    <diagram id="sqlite-progress" name="进展1 SQLite">
+        <mxGraphModel dx="1146" dy="1080" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1400" pageHeight="900" background="#ffffff" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="title" value="进展1：SQLite 样本库与代理训练数据流（与当前代码一致）" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=18;fontFamily=SimSun;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="20" width="900" height="36" as="geometry"/>
+                </mxCell>
+                <mxCell id="leftBox" value="" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#000000;fillColor=#ffffff;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="70" width="396" height="320" as="geometry"/>
+                </mxCell>
+                <mxCell id="leftTitle" value="已实现要点" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=14;fontFamily=SimSun;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="56" y="82" width="200" height="24" as="geometry"/>
+                </mxCell>
+                <mxCell id="bullets" value="&lt;div style=&quot;text-align:left;font-family:SimSun;font-size:13px;line-height:1.8;&quot;&gt;1. &lt;b&gt;GearOptResults.db&lt;/b&gt; 持久化 CCX 结果&lt;br&gt;2. &lt;b&gt;全局库 global()&lt;/b&gt; + &lt;b&gt;运行库 runSession()&lt;/b&gt;&lt;br&gt;3. &lt;b&gt;baseCaseHash&lt;/b&gt;：同基准工况（m,z,α,扭矩,网格,接触,材料）&lt;br&gt;4. &lt;b&gt;designHash&lt;/b&gt;：设计点去重（x1,x2,修形,齿宽,hubRatio）&lt;br&gt;5. 仅 &lt;b&gt;verified_by_ccx=1 &amp;amp; status=done&lt;/b&gt; 可作 RBF 训练&lt;br&gt;6. 样本阈值 &lt;b&gt;minSurrogateSamples ≥ max(25,N)&lt;/b&gt;&lt;br&gt;7. Pareto 标记（isPareto / rank / crowdingDistance）&lt;/div&gt;" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=top;spacingLeft=4;spacingTop=4;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="52" y="110" width="336" height="260" as="geometry"/>
+                </mxCell>
+                <mxCell id="noteBox" value="原 PPT 需改正处：&#10;• 不能 global()/runSession() 后直接 load 全库样本&#10;• 必须先按 baseCaseHash 筛选同工况样本&#10;• 不足 25 个时先 LHS+CCX 补样，再训练 RBF" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#000000;fillColor=#FFF8E1;fontFamily=SimSun;fontSize=12;align=left;verticalAlign=top;spacingLeft=8;spacingTop=8;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="410" width="398" height="110" as="geometry"/>
+                </mxCell>
+                <mxCell id="n_ccx" value="CCX 计算结果" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#000000;fillColor=#ffffff;fontFamily=SimSun;fontSize=13;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="480" y="90" width="140" height="44" as="geometry"/>
+                </mxCell>
+                <mxCell id="n_insert" value="insertDesignPointResult&#10;+ base_case_hash&#10;+ design_hash&#10;+ verified_by_ccx=1" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#000000;fillColor=#ffffff;fontFamily=SimSun;fontSize=12;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="660" y="78" width="180" height="68" as="geometry"/>
+                </mxCell>
+                <mxCell id="n_db" value="GearOptResults.db" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=12;strokeColor=#000000;fillColor=#EEEEEE;fontFamily=SimSun;fontSize=13;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="900" y="72" width="150" height="80" as="geometry"/>
+                </mxCell>
+                <mxCell id="n_global" value="global()&#10;程序目录总库" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#000000;fillColor=#ffffff;fontFamily=SimSun;fontSize=12;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="880" y="190" width="110" height="48" as="geometry"/>
+                </mxCell>
+                <mxCell id="n_run" value="runSession()&#10;本次运行库" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#000000;fillColor=#ffffff;fontFamily=SimSun;fontSize=12;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="1010" y="190" width="110" height="48" as="geometry"/>
+                </mxCell>
+                <mxCell id="n_ui" value="UI 勾选&#10;「启用代理辅助优化」" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#000000;fillColor=#E8F5E9;fontFamily=SimSun;fontSize=12;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="480" y="200" width="160" height="48" as="geometry"/>
+                </mxCell>
+                <mxCell id="2" style="edgeStyle=none;html=1;exitX=0;exitY=0;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;fontColor=#000000;" edge="1" parent="1" source="n_base" target="n_global">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="n_base" value="baseCaseHash&#10;(当前 UI 工况参数)" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#000000;fillColor=#ffffff;fontFamily=SimSun;fontSize=12;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="680" y="200" width="160" height="48" as="geometry"/>
+                </mxCell>
+                <mxCell id="n_load" value="loadValidatedSamples&#10;(same baseCaseHash)&#10;+ designHash 合并去重" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#000000;fillColor=#ffffff;fontFamily=SimSun;fontSize=12;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="880" y="280" width="200" height="58" as="geometry"/>
+                </mxCell>
+                <mxCell id="n_decision" value="样本数 ≥ minSurrogateSamples?&#10;(≥ max(25, 种群规模 N))" style="rhombus;whiteSpace=wrap;html=1;strokeColor=#000000;fillColor=#FFF3E0;fontFamily=SimSun;fontSize=12;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="880" y="380" width="200" height="90" as="geometry"/>
+                </mxCell>
+                <mxCell id="n_lhs" value="LHS + CCX 补样&#10;(仅同 baseCaseHash)" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#000000;fillColor=#FFEBEE;fontFamily=SimSun;fontSize=12;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="660" y="395" width="160" height="58" as="geometry"/>
+                </mxCell>
+                <mxCell id="n_rbf" value="RBF 训练样本&#10;GearSurrogateModel::train" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#000000;fillColor=#E3F2FD;fontFamily=SimSun;fontSize=12;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="900" y="520" width="180" height="48" as="geometry"/>
+                </mxCell>
+                <mxCell id="n_loop" value="代理 NSGA-II + infill CCX&#10;→ 写回 DB → 更新样本集" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#000000;fillColor=#ffffff;fontFamily=SimSun;fontSize=12;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="880" y="610" width="220" height="48" as="geometry"/>
+                </mxCell>
+                <mxCell id="n_pareto" value="最终 Pareto&#10;(仅 status=Done 的 CCX 真值)" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#000000;fillColor=#ffffff;fontFamily=SimSun;fontSize=12;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="880" y="700" width="220" height="48" as="geometry"/>
+                </mxCell>
+                <mxCell id="footer" value="GearOptResultDatabase::global · runSession · baseCaseHash · designHash · &lt;br&gt;insertDesignPointResult · loadValidatedSamples · countValidatedSamplesForBaseCase&lt;br&gt;GearAutoOptManager::startSurrogateAssisted · GearSurrogateModel::train · minSurrogateSampleCount" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=11;fontFamily=Consolas;fontColor=#333333;" parent="1" vertex="1">
+                    <mxGeometry x="30" y="829" width="605" height="40" as="geometry"/>
+                </mxCell>
+                <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#000000;endArrow=classic;" parent="1" source="n_ccx" target="n_insert" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#000000;endArrow=classic;" parent="1" source="n_insert" target="n_db" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#000000;endArrow=classic;" parent="1" source="n_db" target="n_global" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#000000;endArrow=classic;" parent="1" source="n_db" target="n_run" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#000000;endArrow=classic;" parent="1" source="n_ui" target="n_base" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#000000;endArrow=classic;" parent="1" source="n_base" target="n_load" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="760" y="260"/>
+                            <mxPoint x="980" y="260"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#000000;endArrow=classic;" parent="1" source="n_global" target="n_load" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#000000;endArrow=classic;" parent="1" source="n_run" target="n_load" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#000000;endArrow=classic;" parent="1" source="n_load" target="n_decision" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e10" value="否" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#000000;endArrow=classic;fontFamily=SimSun;fontSize=11;" parent="1" source="n_decision" target="n_lhs" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#000000;endArrow=classic;dashed=1;" parent="1" source="n_lhs" target="n_insert" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="740" y="120"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="e12" value="是" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#000000;endArrow=classic;fontFamily=SimSun;fontSize=11;" parent="1" source="n_decision" target="n_rbf" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e13" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#000000;endArrow=classic;" parent="1" source="n_rbf" target="n_loop" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e14" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#000000;endArrow=classic;" parent="1" source="n_loop" target="n_pareto" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="e15" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#000000;endArrow=classic;dashed=1;" parent="1" source="n_loop" target="n_db" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="1150" y="634"/>
+                            <mxPoint x="1150" y="112"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="reject" value="✗ 不允许：混用不同 m/z/α/扭矩/网格 的全库样本" style="text;html=1;strokeColor=#B71C1C;fillColor=#FFEBEE;align=center;verticalAlign=middle;fontSize=12;fontFamily=SimSun;fontColor=#B71C1C;" parent="1" vertex="1">
+                    <mxGeometry x="480" y="320" width="320" height="36" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

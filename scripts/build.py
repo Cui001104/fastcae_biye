@@ -33,7 +33,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Qt5：cmake 找的是 Qt5Config.cmake 所在目录
-QT5_DIR = r"D:/3rdparty/Qt/5.14.2/5.14.2/msvc2017_64/lib/cmake/Qt5"
+QT5_DIR = r"E:/APPs/QT/5.14.2/msvc2017_64/lib/cmake/Qt5"
 
 # CMake 生成器：本机装的是 VS 2019 BuildTools
 CMAKE_GENERATOR = "Visual Studio 16 2019"

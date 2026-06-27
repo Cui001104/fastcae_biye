@@ -28,7 +28,7 @@ enum VarIdx {
     VAR_LCA1     = 7,
     VAR_CA2      = 8,
     VAR_LCA2     = 9,
-    VAR_WIDTH    = 10,
+    VAR_COMMON_WIDTH = 10,  ///< 齿轮副公共齿宽（只采样一次）
     VAR_HUBRATIO = 11,
     VAR_COUNT    = 12
 };
@@ -36,7 +36,7 @@ enum VarIdx {
 /// NSGA-II 个体。
 struct GEARAUTOOPTAPI Individual {
     QVector<double> vars;               ///< VAR_COUNT 个设计变量
-    QVector<double> objs;               ///< 目标值（sigmaMax, mass[, ratioErr]）
+    QVector<double> objs;               ///< 目标值（cpressMax_MPa, sigmaMax_MPa[, mass/ratioErr]）
     double   constraintViolation = 0.0; ///< 总约束违反量（可行个体 = 0）
     int      rank               = 0;   ///< 非支配层（1 = Pareto 最优）
     double   crowdingDist       = 0.0;

@@ -167,18 +167,19 @@ namespace Command {
 
 	TopoDS_Wire GeoCommandCreateGear::createGearProfile()
 	{
-		// thin wrapper, real logic in buildGearProfileWire
+		_rootFilletEdgesGear1.clear();
 		return buildGearProfileWire(_numberOfTeeth, _numberOfSecondTeeth,
 		                            _x1, _x1 + _x2,
 		                            _tipReliefAmount, _tipReliefLength,
-		                            gp_Pnt(0, 0, 0));
+		                            gp_Pnt(0, 0, 0), &_rootFilletEdgesGear1);
 	}
 
 	TopoDS_Wire GeoCommandCreateGear::buildGearProfileWire(int Z, int Zmate,
 	                                                       double xOwn, double xSum,
 	                                                       double tipReliefAmount,
 	                                                       double tipReliefLength,
-	                                                       const gp_Pnt& center)
+	                                                       const gp_Pnt& center,
+	                                                       QVector<TopoDS_Edge>* rootFilletEdgesOut)
 	{
 		// Generic gear profile wire builder (parameterized version of original gear-1 path).
 		// Z      : own gear tooth count
@@ -254,6 +255,9 @@ namespace Command {
 		involuteRight.reserve(numPoints + 1);
 
 		const double R_relief_start = Ra - tipReliefLength;
+		const bool   reliefEnabled  = (tipReliefAmount > 0.0 && tipReliefLength > 0.0);
+		double       maxDeltaMm     = 0.0;
+		int          reliefHits     = 0;
 
 		for (int i = 0; i <= numPoints; ++i) {
 			const double t     = (double)i / numPoints;
@@ -263,9 +267,11 @@ namespace Command {
 			const double R_current = std::sqrt(pt.X() * pt.X() + pt.Y() * pt.Y());
 
 			// Parabolic tip relief: shift inward by Ca * (y/Lca)^2 along the radial direction.
-			if (tipReliefAmount > 0.0 && tipReliefLength > 0.0 && R_current > R_relief_start) {
+			if (reliefEnabled && R_current > R_relief_start) {
 				const double yRel  = R_current - R_relief_start;
 				const double delta = tipReliefAmount * (yRel / tipReliefLength) * (yRel / tipReliefLength);
+				++reliefHits;
+				if (delta > maxDeltaMm) maxDeltaMm = delta;
 				const double nx    = pt.X() / R_current;
 				const double ny    = pt.Y() / R_current;
 				pt.SetX(pt.X() - delta * nx);
@@ -278,7 +284,37 @@ namespace Command {
 			involuteRight.push_back(mirrorPoint(ptRotated));
 		}
 
+		// 齿顶修形（抛物线）是否实际参与齿廓：需 Ca>0、Lca>0，且采样段上有 R > Ra-Lca
+		{
+			const double R_tipSample = std::sqrt(involuteLeft.back().X() * involuteLeft.back().X()
+			                                     + involuteLeft.back().Y() * involuteLeft.back().Y());
+			// 注意：勿在 QString::arg 中用 %10/%11/%12，Qt 会把 %10 当成 %1 + 字面量 "0" 等，导致错位与警告
+			qDebug().noquote() << QStringLiteral("[GearCreate][TipRelief]")
+			                   << QStringLiteral("Z=") << Z << QStringLiteral("zMate=") << Zmate
+			                   << QStringLiteral("center=(") << center.X() << QLatin1Char(',') << center.Y()
+			                   << QLatin1Char(')')
+			                   << QStringLiteral("Ra_mm=") << Ra << QStringLiteral("R_reliefStart_mm=")
+			                   << R_relief_start << QStringLiteral("Ca_mm=") << tipReliefAmount
+			                   << QStringLiteral("Lca_mm=") << tipReliefLength << QStringLiteral("enabled=")
+			                   << (reliefEnabled ? 1 : 0) << QStringLiteral("reliefHits=") << reliefHits
+			                   << QLatin1Char('/') << (numPoints + 1) << QStringLiteral("maxDeltaMm=")
+			                   << maxDeltaMm << QStringLiteral("R_tip_mm=") << R_tipSample;
+			if (!reliefEnabled) {
+				qDebug().noquote() << QString::fromUtf8("[GearCreate][TipRelief] 未应用修形: Ca 或 Lca 为 0");
+			} else if (reliefHits == 0) {
+				qDebug().noquote()
+				    << QString::fromUtf8("[GearCreate][TipRelief] 参数非零但采样未进入修形区: 检查 Lca 是否过小或 "
+				                      "渐开线终点半径未超过 R_reliefStart");
+			}
+		}
+
 		BRepBuilderAPI_MakeWire wireBuilder;
+
+		auto addRootArcEdge = [&](const TopoDS_Edge& edge) {
+			wireBuilder.Add(edge);
+			if (rootFilletEdgesOut)
+				rootFilletEdgesOut->append(edge);
+		};
 
 		for (int tooth = 0; tooth < Z; ++tooth) {
 			const double toothAngle = tooth * angularPitch;
@@ -338,8 +374,11 @@ namespace Command {
 					gp_Pnt arcEnd(Rf * std::cos(limitedEndAngle), Rf * std::sin(limitedEndAngle), 0);
 					try {
 						GC_MakeArcOfCircle arcMaker(rootRight, rootMid, arcEnd);
-						if (arcMaker.IsDone())
-							wireBuilder.Add(BRepBuilderAPI_MakeEdge(arcMaker.Value()));
+						if (arcMaker.IsDone()) {
+							BRepBuilderAPI_MakeEdge edgeMaker(arcMaker.Value());
+							if (edgeMaker.IsDone())
+								addRootArcEdge(edgeMaker.Edge());
+						}
 					} catch (...) {}
 					if (arcEnd.Distance(nextRootLeft) > 1e-6)
 						wireBuilder.Add(BRepBuilderAPI_MakeEdge(arcEnd, nextRootLeft));
@@ -360,20 +399,29 @@ namespace Command {
 								gp_Circ circle(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), Rf);
 								GC_MakeArcOfCircle arcMaker(circle, rootRightAngle, nextRootLeftAngle, true);
 								if (arcMaker.IsDone()) {
-									wireBuilder.Add(BRepBuilderAPI_MakeEdge(arcMaker.Value()));
-									added = true;
+									BRepBuilderAPI_MakeEdge edgeMaker(arcMaker.Value());
+									if (edgeMaker.IsDone()) {
+										addRootArcEdge(edgeMaker.Edge());
+										added = true;
+									}
 								}
 							} else {
 								GC_MakeArcOfCircle arcMaker(rootRight, rootMid, nextRootLeft);
 								if (arcMaker.IsDone()) {
-									wireBuilder.Add(BRepBuilderAPI_MakeEdge(arcMaker.Value()));
-									added = true;
+									BRepBuilderAPI_MakeEdge edgeMaker(arcMaker.Value());
+									if (edgeMaker.IsDone()) {
+										addRootArcEdge(edgeMaker.Edge());
+										added = true;
+									}
 								} else {
 									gp_Circ circle(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), Rf);
 									GC_MakeArcOfCircle arcMaker2(circle, rootRightAngle, nextRootLeftAngle, true);
 									if (arcMaker2.IsDone()) {
-										wireBuilder.Add(BRepBuilderAPI_MakeEdge(arcMaker2.Value()));
-										added = true;
+										BRepBuilderAPI_MakeEdge edgeMaker(arcMaker2.Value());
+										if (edgeMaker.IsDone()) {
+											addRootArcEdge(edgeMaker.Edge());
+											added = true;
+										}
 									}
 								}
 							}
@@ -382,10 +430,15 @@ namespace Command {
 							try {
 								gp_Circ circle(gp_Ax2(gp_Pnt(0, 0, 0), gp_Dir(0, 0, 1)), Rf);
 								GC_MakeArcOfCircle arcMaker(circle, rootRightAngle, nextRootLeftAngle, true);
-								if (arcMaker.IsDone())
-									wireBuilder.Add(BRepBuilderAPI_MakeEdge(arcMaker.Value()));
-								else
+								if (arcMaker.IsDone()) {
+									BRepBuilderAPI_MakeEdge edgeMaker(arcMaker.Value());
+									if (edgeMaker.IsDone())
+										addRootArcEdge(edgeMaker.Edge());
+									else
+										wireBuilder.Add(BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft));
+								} else {
 									wireBuilder.Add(BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft));
+								}
 							} catch (...) {
 								wireBuilder.Add(BRepBuilderAPI_MakeEdge(rootRight, nextRootLeft));
 							}
@@ -413,6 +466,12 @@ namespace Command {
 			trsf.SetTranslation(gp_Vec(center.X(), center.Y(), center.Z()));
 			BRepBuilderAPI_Transform tf(wire, trsf);
 			wire = TopoDS::Wire(tf.Shape());
+			if (rootFilletEdgesOut) {
+				for (int i = 0; i < rootFilletEdgesOut->size(); ++i) {
+					BRepBuilderAPI_Transform edgeTf((*rootFilletEdgesOut)[i], trsf);
+					(*rootFilletEdgesOut)[i] = TopoDS::Edge(edgeTf.Shape());
+				}
+			}
 		}
 		return wire;
 	}
@@ -421,41 +480,50 @@ namespace Command {
 	{
 		// Thin wrapper. Geometry built by buildGearProfileWire then translated to (0, a', 0).
 		const double cd = centerDistanceBetweenGears();
+		_rootFilletEdgesGear2.clear();
 		return buildGearProfileWire(_numberOfSecondTeeth, _numberOfTeeth,
 		                            _x2, _x1 + _x2,
 		                            _tipReliefAmount2, _tipReliefLength2,
-		                            gp_Pnt(0, cd, 0));
+		                            gp_Pnt(0, cd, 0), &_rootFilletEdgesGear2);
+	}
+
+	double GeoCommandCreateGear::operatingPressureAngleRad() const
+	{
+		const double phi   = _pressureAngle * M_PI / 180.0;
+		const int    Z1    = _numberOfTeeth;
+		const int    Z2    = _numberOfSecondTeeth;
+		const double x_sig = _x1 + _x2;
+		if (std::fabs(x_sig) < 1e-12)
+			return phi;
+
+		const double invAlpha      = std::tan(phi) - phi;
+		const double invAlphaPrime = invAlpha + 2.0 * x_sig * std::tan(phi) / static_cast<double>(Z1 + Z2);
+
+		double       alphaPrime = phi;
+		const double tolerance  = 1e-10;
+		for (int i = 0; i < 100; ++i) {
+			const double f      = std::tan(alphaPrime) - alphaPrime - invAlphaPrime;
+			const double fPrime = 1.0 / (std::cos(alphaPrime) * std::cos(alphaPrime)) - 1.0;
+			const double delta  = f / fPrime;
+			alphaPrime -= delta;
+			if (std::fabs(delta) < tolerance)
+				break;
+		}
+		return alphaPrime;
 	}
 
 	double GeoCommandCreateGear::centerDistanceBetweenGears() const
 	{
-		const double m	 = _module;
-		const int	   Z1	= _numberOfTeeth;
-		const int	   Z2	= _numberOfSecondTeeth;
-		const double x1	 = _x1;
-		const double x2	 = _x2;
+		const double m   = _module;
+		const int    Z1  = _numberOfTeeth;
+		const int    Z2  = _numberOfSecondTeeth;
 		const double phi = _pressureAngle * M_PI / 180.0;
 
-		if(x1 + x2 == 0) {
+		if (std::fabs(_x1 + _x2) < 1e-12)
 			return (Z1 + Z2) * m / 2.0;
-		}
 
-		const double a			  = (Z1 + Z2) * m / 2.0;
-		const double x_sig			  = x1 + x2;
-		const double invAlpha		  = std::tan(phi) - phi;
-		const double invAlphaPrime = invAlpha + 2 * x_sig * std::tan(phi) / (Z1 + Z2);
-
-		double alphaPrime = phi;
-		const double tolerance	 = 1e-10;
-		const int	 maxIterations = 100;
-		for(int i = 0; i < maxIterations; i++) {
-			const double f	   = std::tan(alphaPrime) - alphaPrime - invAlphaPrime;
-			const double fPrime = 1.0 / (std::cos(alphaPrime) * std::cos(alphaPrime)) - 1.0;
-			const double delta  = f / fPrime;
-			alphaPrime -= delta;
-			if(std::abs(delta) < tolerance)
-				break;
-		}
+		const double a          = (Z1 + Z2) * m / 2.0;
+		const double alphaPrime = operatingPressureAngleRad();
 		return a * std::cos(phi) / std::cos(alphaPrime);
 	}
 
@@ -508,6 +576,14 @@ namespace Command {
 
 	bool GeoCommandCreateGear::execute()
 	{
+		qDebug().noquote() << QStringLiteral("[GearCreate][TipRelief] execute_input")
+		                   << QStringLiteral("gear1_Ca1_mm=") << _tipReliefAmount
+		                   << QStringLiteral("Lca1_mm=") << _tipReliefLength
+		                   << QStringLiteral("gear2_Ca2_mm=") << _tipReliefAmount2
+		                   << QStringLiteral("Lca2_mm=") << _tipReliefLength2 << QStringLiteral("z1=")
+		                   << _numberOfTeeth << QStringLiteral("z2=") << _numberOfSecondTeeth
+		                   << QStringLiteral("m_mm=") << _module;
+
 		// 鍒涘缓绗竴涓娇杞?D杞粨
 		TopoDS_Wire profile = createGearProfile();
 		if(profile.IsNull()) {
@@ -547,22 +623,46 @@ namespace Command {
 			return false;
 		}
 
-    // 璁＄畻鏃嬭浆瑙掑害
-    double rotationAngle = 0.0;
-    
-    // 鏍规嵁榻挎暟璁＄畻鏃嬭浆瑙掑害
-    // 鏃嬭浆鍗婁釜榻跨殑瑙掑害锛堝浜庣浜屼釜榻胯疆锛?
-    rotationAngle = M_PI / static_cast<double>(_numberOfSecondTeeth);
-	// 瀵圭浜屼釜榻胯疆杩涜鏃嬭浆
-    if(std::abs(rotationAngle) > 1e-6) {
-        gp_Trsf rotateTransform;
-        gp_Ax1 rotationAxis(gp_Pnt(0, centerDistance, 0), gp_Dir(0, 0, 1));
-        rotateTransform.SetRotation(gp_Ax1(gp_Pnt(0, centerDistance, 0), gp_Dir(0, 0, 1)), rotationAngle);
-        BRepBuilderAPI_Transform rotateMaker(secondGearShape, rotateTransform);
-        if(rotateMaker.IsDone()) {
-            secondGearShape = rotateMaker.Shape();
-        }
-    }
+		// 齿轮 2 绕自身轴线的啮合相位：
+		// 1) 仅当啮合线两侧同为齿或同为槽时，才加 π/z2 半齿距；
+		// 2) inv(α′)−inv(α)：变位无侧隙相位补偿。
+		const double phi        = _pressureAngle * M_PI / 180.0;
+		const double alphaPrime = operatingPressureAngleRad();
+		const double invPhi     = std::tan(phi) - phi;
+		const double invAp      = std::tan(alphaPrime) - alphaPrime;
+		const double invDiff    = invAp - invPhi;
+
+		const int z1 = _numberOfTeeth;
+		const int z2 = _numberOfSecondTeeth;
+
+		const bool gear1ToothOnMeshLine = (z1 % 4 == 0);
+		const bool gear2ToothOnMeshLine = (z2 % 4 == 0);
+
+		// gear1 在 (0,0)，gear2 在 (0,centerDistance)，啮合线沿 +Y。
+		const bool needHalfToothShift = (gear1ToothOnMeshLine == gear2ToothOnMeshLine);
+
+		const double halfTooth =
+		    needHalfToothShift ? M_PI / static_cast<double>(z2) : 0.0;
+
+		double rotationAngle = halfTooth + invDiff;
+
+		qDebug() << "[Gear][Phase] z1 =" << z1
+		         << "z2 =" << z2
+		         << "gear1ToothOnMeshLine =" << gear1ToothOnMeshLine
+		         << "gear2ToothOnMeshLine =" << gear2ToothOnMeshLine
+		         << "needHalfToothShift =" << needHalfToothShift
+		         << "halfToothDeg =" << halfTooth * 180.0 / M_PI
+		         << "invDiffDeg =" << invDiff * 180.0 / M_PI
+		         << "rotationAngleDeg =" << rotationAngle * 180.0 / M_PI;
+
+		if (std::abs(rotationAngle) > 1e-6) {
+			gp_Trsf rotateTransform;
+			rotateTransform.SetRotation(
+			    gp_Ax1(gp_Pnt(0, centerDistance, 0), gp_Dir(0, 0, 1)), rotationAngle);
+			BRepBuilderAPI_Transform rotateMaker(secondGearShape, rotateTransform);
+			if (rotateMaker.IsDone())
+				secondGearShape = rotateMaker.Shape();
+		}
 		// 鍚堝苟涓や釜榻胯疆
 		TopoDS_Shape* shape1 = new TopoDS_Shape;
 		*shape1 = gearShape;
@@ -587,9 +687,20 @@ namespace Command {
 		const QString name2    = baseName + QStringLiteral("_2");
 
 		if(_isEdit) {
+			// 原逻辑：只 replace 齿轮1，再 append 新齿轮2，树里「旧的齿轮2」仍存在。
+			// 改 z1/变位后中心距与齿廓都变，旧齿轮2 仍停在旧中心距处，会与新的齿轮1 穿透/看似重合。
+			// 按 name2 全树删除旧齿轮2（不限于 editIdx+1），避免几何树顺序变化时删不到。
 			set1->setName(_editSet->getName());
-			_geoData->replaceSet(set1, _editSet);
 			emit removeDisplayActor(_editSet);
+			_geoData->replaceSet(set1, _editSet);
+			for (int idx = _geoData->getGeometrySetCount() - 1; idx >= 0; --idx) {
+				Geometry::GeometrySet* gs = _geoData->getGeometrySetAt(idx);
+				if (!gs || gs == set1) continue;
+				if (gs->getName() == name2) {
+					emit removeDisplayActor(gs);
+					_geoData->removeGeometrySet(idx);
+				}
+			}
 			set2->setName(name2);
 			_geoData->appendGeometrySet(set2);
 		} else {

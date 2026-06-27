@@ -3,6 +3,7 @@
 
 #include "GearAutoOpt/GearAutoOptAPI.h"
 #include "GearAutoOpt/data/GearDesignPoint.h"
+#include "GearAutoOpt/data/GearLogLevel.h"
 
 #include <QObject>
 #include <QString>
@@ -41,13 +42,16 @@ public:
 	void    setWorkDir(const QString& dir);
 	QString workDir() const { return _workDir; }
 
+	void setLogLevel(GearLogLevel level);
+	GearLogLevel logLevel() const { return _logLevel; }
+
 	CaseRunnerState state() const { return _state; }
 
 	/// 同步跑完一个设计点。dp 按引用更新：
 	/// - 成功 → dp.status = Done，sigmaMax / uMax / mass 由 ParseStep 写回
 	/// - 失败 → dp.status = Failed，errorMsg 写回首条错误
 	/// 跑完会 emit `finished(success)`，期间 emit 多次 `stateChanged`。
-	void runOne(GearDesignPoint& dp);
+	virtual void runOne(GearDesignPoint& dp);
 
 signals:
 	/// 进入新状态（包括 Done/Failed 终态）
@@ -67,11 +71,14 @@ protected:
 	virtual bool runParseStep(GearDesignPoint& dp);
 
 	void transition(CaseRunnerState s);
+	void emitLogNormal(const QString& msg);
+	void emitLogDebug(const QString& msg);
 	void emitLog(const QString& msg);
 
 private:
 	QString         _workDir;
 	CaseRunnerState _state{CaseRunnerState::Idle};
+	GearLogLevel    _logLevel{GearLogLevel::Normal};
 };
 
 } // namespace GearAutoOpt

@@ -14,7 +14,13 @@
 #include <vtkSelection.h>
 #include <vtkExtractSelection.h>
 #include <vtkAppendFilter.h>
+#include <vtkCell3D.h>
+#include <vtkCellArray.h>
+#include <vtkIdList.h>
+#include <vtkPoints.h>
+#include <vtkPolyData.h>
 #include <QDebug>
+#include <vector>
 
 namespace MeshData
 {
@@ -63,6 +69,7 @@ void MeshSet::setType(SetType t)
     case Element: stype = "Element"; break;
     case Family: stype = "Family"; break;
     case BCZone: stype = "BCZone"; break;
+    case UserDef: stype = "Surface"; break;
     default: break;
     }
     this->appendProperty("Type", stype);
@@ -247,6 +254,7 @@ SetType MeshSet::stringToSettype(QString s)
     else if (s == "Element") t = Element;
     else if (s == "Family") t = Family;
     else if (s == "BCZone") t = BCZone;
+    else if (s == "Surface" || s == "UserDef") t = UserDef;
 
     return t;
 }
@@ -356,6 +364,7 @@ QString MeshSet::setTypeToString(SetType type)
     case Element : qtype = "Element"; break;
     case Family : qtype = "Family"; break;
     case BCZone : qtype = "BCZone"; break;
+    case UserDef : qtype = "Surface"; break;
     default : break;
     }
     return qtype;
@@ -363,7 +372,72 @@ QString MeshSet::setTypeToString(SetType type)
 
 BoundMeshSet::BoundMeshSet(): MeshSet()
 {
+	setType(UserDef);
+}
 
+void BoundMeshSet::generateDisplayDataSet()
+{
+	if (_displayDataSet != nullptr)
+		return;
+	if (m_CellFaces.isEmpty())
+		return;
+
+	MeshData *meshdata = MeshData::getInstance();
+	const QList<int> kids = getKernals();
+	if (kids.isEmpty())
+		return;
+
+	vtkSmartPointer<vtkPoints> points = vtkSmartPointer<vtkPoints>::New();
+	vtkSmartPointer<vtkCellArray> polys = vtkSmartPointer<vtkCellArray>::New();
+
+	for (int kid : kids)
+	{
+		MeshKernal *k = meshdata->getKernalByID(kid);
+		if (k == nullptr)
+			continue;
+		vtkDataSet *dataset = k->getMeshData();
+		if (dataset == nullptr)
+			continue;
+
+		for (auto it = m_CellFaces.constBegin(); it != m_CellFaces.constEnd(); ++it)
+		{
+			const int cellIdx = it.key();
+			vtkCell *solid = dataset->GetCell(cellIdx);
+			auto *c3d = vtkCell3D::SafeDownCast(solid);
+			if (c3d == nullptr)
+				continue;
+			for (int fi : it.value())
+			{
+				vtkCell *face = c3d->GetFace(fi);
+				if (face == nullptr)
+					continue;
+				vtkIdList *pids = face->GetPointIds();
+				if (pids == nullptr)
+					continue;
+				const vtkIdType np = pids->GetNumberOfIds();
+				if (np < 3)
+					continue;
+				std::vector<vtkIdType> ids(static_cast<size_t>(np));
+				for (vtkIdType pi = 0; pi < np; ++pi)
+				{
+					double p[3];
+					dataset->GetPoint(pids->GetId(pi), p);
+					ids[static_cast<size_t>(pi)] = points->InsertNextPoint(p);
+				}
+				polys->InsertNextCell(np, ids.data());
+			}
+		}
+	}
+
+	if (points->GetNumberOfPoints() < 3)
+		return;
+
+	vtkSmartPointer<vtkPolyData> poly = vtkSmartPointer<vtkPolyData>::New();
+	poly->SetPoints(points);
+	poly->SetPolys(polys);
+	_displayDataSet = vtkPolyData::New();
+	vtkPolyData::SafeDownCast(_displayDataSet)->DeepCopy(poly);
+	appendProperty("Count", m_CellFaces.size());
 }
 
 void BoundMeshSet::setCellFaces(const QMap<int, QVector<int>> cellFaces)

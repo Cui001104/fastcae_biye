@@ -40,6 +40,7 @@ namespace MeshData
 	class MeshData;
 	class MeshKernal;
 	class MeshSet;
+	class BoundMeshSet;
 }
 
 namespace MainWidget
@@ -146,6 +147,8 @@ namespace MainWidget
 		 * @return MeshKernalViewObj*  date对应的ViewObject
 		 */
 		MeshKernalViewObj *getViewObjByDisplayDataSet(vtkDataSet *data);
+		void showBoundMeshSetOverlay(MeshData::BoundMeshSet *set);
+		void clearBoundMeshSetOverlay();
 
 	private:
 		/**
@@ -172,6 +175,7 @@ namespace MainWidget
 		 * @brief 临时记录网格组件高亮对象
 		 */
 		MeshData::MeshSet *_highLightSet{nullptr};
+		vtkActor *_boundSetActor{nullptr};
 		/**
 		 * @brief 高亮的交互选取的对象
 		 */

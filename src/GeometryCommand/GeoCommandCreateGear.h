@@ -4,9 +4,11 @@
 #include "geometryCommandAPI.h"
 #include "GeoCommandBase.h"
 #include <QString>
+#include <QVector>
 #include <vector>
 
 #include <gp_Pnt.hxx>
+#include <TopoDS_Edge.hxx>
 #include <TopoDS_Wire.hxx>
 #include <TopoDS_Shape.hxx>
 
@@ -59,6 +61,9 @@ namespace Command {
 		void setprofileShiftCoefficient1(double coefficient1);
 		void setprofileShiftCoefficient2(double coefficient2);
 
+		const QVector<TopoDS_Edge>& rootFilletEdgesGear1() const { return _rootFilletEdgesGear1; }
+		const QVector<TopoDS_Edge>& rootFilletEdgesGear2() const { return _rootFilletEdgesGear2; }
+
 	private:
 		/// 生成渐开线齿廓点
 		void		 generateInvolutePoints(std::vector<gp_Pnt>& points);
@@ -71,9 +76,12 @@ namespace Command {
 		TopoDS_Wire  buildGearProfileWire(int Z, int Zmate,
 		                                  double xOwn, double xSum,
 		                                  double tipReliefAmount, double tipReliefLength,
-		                                  const gp_Pnt& center);
+		                                  const gp_Pnt& center,
+		                                  QVector<TopoDS_Edge>* rootFilletEdgesOut = nullptr);
 		/// 分度圆直径对应的中心圆柱孔闭合线（反向 orientation，用作面内孔）
 		TopoDS_Wire	 createCenterHoleWire(double holeRadius, const gp_Pnt& centerOnXYPlane) const;
+		/// 与中心距、齿廓内部一致的工作啮合角 α′（弧度）；x1+x2=0 时等于分度压力角 φ。
+		double		 operatingPressureAngleRad() const;
 		/// 两齿轮轴线方向上的标准/变位中心距（与 createSecondGearProfile 平移一致）
 		double		 centerDistanceBetweenGears() const;
 		/// 拉伸生成3D齿轮（外轮廓 + 中心内孔闭环）
@@ -99,7 +107,9 @@ namespace Command {
 		double				   _x2{ 0.0 };//第二个齿轮的变位系数
 
 		Geometry::GeometrySet* _res{};   ///< 主齿轮 GeometrySet
-		Geometry::GeometrySet* _res2{};  ///< 副齿轮 GeometrySet 
+		Geometry::GeometrySet* _res2{};  ///< 副齿轮 GeometrySet
+		QVector<TopoDS_Edge>   _rootFilletEdgesGear1;
+		QVector<TopoDS_Edge>   _rootFilletEdgesGear2;
 
 		/// 规则：圆柱面半径 ≈ holeRadius → "hub_hole"；
 		///       圆柱面半径 ≈ Rf (齿根) → "root_fillet"；

@@ -6,12 +6,21 @@
 #include "GearAutoOpt/data/GearDesignPoint.h"
 #include "GearAutoOpt/data/GearOptConfig.h"
 #include "GearAutoOpt/opt/NSGA2.h"
+#include "GearAutoOpt/surrogate/GearSurrogateModel.h"
 
 #include <QObject>
 #include <QThread>
 #include <QVector>
+#include <functional>
 
 namespace GearAutoOpt {
+
+/// CCX 评估统计（infill 验证时区分新算与 cache 复用）。
+struct GEARAUTOOPTAPI CcxEvalSummary {
+	int           newCcxCount     = 0;
+	int           reusedCacheCount = 0;
+	QVector<bool> cacheHitByIndex;
+};
 
 /// NSGA-II 多目标优化总控器。
 ///
@@ -57,6 +66,7 @@ public:
 public slots:
     /// 启动优化（在 QThread::started 信号后调用）
     void start();
+    void startSurrogateAssisted();
 
 signals:
     /// 一代评估完成（gen = 代号，1-based；paretoSize = 当前 Pareto 集大小）
@@ -71,10 +81,43 @@ signals:
 private:
     /// 对 population 中未评估的个体逐一调 runOne，填写 objs。
     void evaluatePopulation(Population& pop, int generation);
+    void evaluatePopulationByCcx(
+        Population& pop,
+        int generation,
+        CcxEvalSummary* summary = nullptr,
+        const std::function<void(int, const GearDesignPoint&, bool)>& pointCallback = {});
+    /// 代理辅助 infill 验证：按配置选择串行或并行 CCX。
+    void evaluateInfillByCcx(
+        Population& pop,
+        int generation,
+        CcxEvalSummary* summary = nullptr,
+        const std::function<void(int, const GearDesignPoint&, bool)>& pointCallback = {});
+    void evaluateInfillByCcxParallel(
+        Population& pop,
+        int generation,
+        CcxEvalSummary* summary,
+        const std::function<void(int, const GearDesignPoint&, bool)>& pointCallback);
+    void evaluatePopulationBySurrogate(Population& pop,
+                                       int generation,
+                                       const GearSurrogateModel& model);
+
+    void syncGenerationParetoToDatabase(int generation, const Population& pop);
+    void syncFinalParetoToDatabase();
+    void openResultDatabases();
+    GearDesignPoint configuredBasePoint() const;
 
     GearOptConfig _cfg;
     QString       _runDir;
     bool          _stopRequested{false};
+
+    /// 本次优化 run 固定的网格设置（start() 时从 config 快照，全代一致）
+    double _fixedMeshSizeMm{1.50};
+    double _fixedRootMeshSizeMm{0.40};
+    int    _fixedZLayers{11};
+    bool   _runMeshAuto{false};
+    QString _runId;
+    bool    _surrogateThresholdLogged{false};
+    double  _fixedCommonWidthMm{10.0};
 
     // in-memory 全量记录，按代分组
     QVector<QList<GearDesignPoint>> _allPoints;

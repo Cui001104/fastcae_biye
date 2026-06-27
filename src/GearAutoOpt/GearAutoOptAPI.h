@@ -9,4 +9,11 @@
 #define GEARAUTOOPTAPI Q_DECL_IMPORT
 #endif
 
+namespace GearAutoOpt {
+
+GEARAUTOOPTAPI const char* moduleName();
+GEARAUTOOPTAPI int offlineBackfillCpressDistributionMetrics(const char* dbPath, int binCount = 11);
+
+} // namespace GearAutoOpt
+
 #endif

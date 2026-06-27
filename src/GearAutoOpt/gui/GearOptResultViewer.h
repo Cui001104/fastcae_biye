@@ -1,4 +1,4 @@
-// UTF-8 BOM
+﻿// UTF-8 BOM
 #ifndef _GEARAUTOOPT_GEAR_OPT_RESULT_VIEWER_H_
 #define _GEARAUTOOPT_GEAR_OPT_RESULT_VIEWER_H_
 
@@ -15,8 +15,8 @@ class QLabel;
 namespace GearAutoOpt {
 
 /// 展示：
-///   - 上方 QTableWidget：全设计点列表（gen / id / z1 / m / σ / mass / status）
-///   - 下方 散点图（σ vs mass），Pareto 前沿高亮（若 Qt Charts 可用）
+///   - 上方 QTableWidget：全设计点列表（几何与修形参数、σ_max、u_max、mass、状态等）
+///   - 下方 散点图（cpress vs mass），Pareto 前沿高亮（若 Qt Charts 可用）
 ///   - "加载该点几何"按钮：双击行后可恢复该设计点的几何
 class GEARAUTOOPTAPI GearOptResultViewer : public QDialog {
     Q_OBJECT

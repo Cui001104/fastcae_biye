@@ -46,6 +46,7 @@ namespace MeshData
 		bool readElements(vtkUnstructuredGrid* g, QString &line);
 		bool readNSet(QString &line, QList<int>& inpSetIds);
 		bool readElSet(QString &line, QList<int>& inpSetIds);
+		bool readSurface(QString &line, QList<int> &inpSetIds);
 		bool readMaterial(QString &line, QStringList& materialName, QStringList& density, QStringList& elastic);
 		bool readBoundary(QString &line, QStringList& bcSetIds, QStringList& bcName, QStringList& bcType, QList<double>& displacement, QList<double>& rotation);
 

@@ -1,0 +1,102 @@
+<mxfile host="65bd71144e">
+    <diagram id="fig24-workflow" name="图2-4 平台总体工作流程">
+        <mxGraphModel dx="707" dy="756" grid="0" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="720" pageHeight="980" background="#ffffff" math="0" shadow="0">
+            <root>
+                <mxCell id="0"/>
+                <mxCell id="1" parent="0"/>
+                <mxCell id="title" value="图 2-4  平台总体工作流程" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=16;fontFamily=SimSun;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="120" y="24" width="480" height="32" as="geometry"/>
+                </mxCell>
+                <mxCell id="subtitle" value="主控调度管理器（GearAutoOptManager）统一驱动的数据驱动、全自动、智能集成优化闭环" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=11;fontFamily=SimSun;fontColor=#333333;" parent="1" vertex="1">
+                    <mxGeometry x="60" y="56" width="600" height="24" as="geometry"/>
+                </mxCell>
+                <mxCell id="outer" value="" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#000000;fillColor=#FAFAFA;strokeWidth=1.2;dashed=1;dashPattern=8 4;" parent="1" vertex="1">
+                    <mxGeometry x="40" y="92" width="640" height="745" as="geometry"/>
+                </mxCell>
+                <mxCell id="s1_num" value="①" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=18;fontFamily=SimSun;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="68" y="118" width="36" height="36" as="geometry"/>
+                </mxCell>
+                <mxCell id="s1" value="&lt;b&gt;阶段一：参数配置与任务初始化&lt;/b&gt;&lt;br&gt;齿轮参数 · 工况载荷 · 设计变量边界 · 优化目标/约束&lt;br&gt;GearOptDialog · GearOptConfig · GearOptGeometryBridge" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#000000;fillColor=#FFFFFF;fontFamily=SimSun;fontSize=12;fontColor=#000000;align=center;verticalAlign=middle;spacingTop=4;spacingBottom=4;" parent="1" vertex="1">
+                    <mxGeometry x="120" y="108" width="520" height="72" as="geometry"/>
+                </mxCell>
+                <mxCell id="s2_num" value="②" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=18;fontFamily=SimSun;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="68" y="228" width="36" height="36" as="geometry"/>
+                </mxCell>
+                <mxCell id="s2" value="&lt;b&gt;阶段二：主控调度管理器统一驱动&lt;/b&gt;&lt;br&gt;任务编排 · LHS 初始种群生成 · 种群/代际调度 · 后台线程执行&lt;br&gt;GearAutoOptManager（start / startSurrogateAssisted）" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#000000;fillColor=#F7F7F7;fontFamily=SimSun;fontSize=12;fontColor=#000000;align=center;verticalAlign=middle;spacingTop=4;spacingBottom=4;" parent="1" vertex="1">
+                    <mxGeometry x="120" y="218" width="520" height="72" as="geometry"/>
+                </mxCell>
+                <mxCell id="s3_num" value="③" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=18;fontFamily=SimSun;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="68" y="338" width="36" height="36" as="geometry"/>
+                </mxCell>
+                <mxCell id="s3" value="&lt;b&gt;阶段三：单工况 CAD/CAE 自动分析流水线&lt;/b&gt;&lt;br&gt;参数化建模(OCC) → 自动网格(Gmsh) → 求解输入(CCX) → 有限元求解 → 结果解析&lt;br&gt;GearOptCaseRunner：Geom → Mesh → InpWrite → Solve → Parse → VTU" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#000000;fillColor=#FFFFFF;fontFamily=SimSun;fontSize=12;fontColor=#000000;align=center;verticalAlign=middle;spacingTop=4;spacingBottom=4;" parent="1" vertex="1">
+                    <mxGeometry x="120" y="328" width="520" height="72" as="geometry"/>
+                </mxCell>
+                <mxCell id="s4_num" value="④" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=18;fontFamily=SimSun;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="68" y="448" width="36" height="36" as="geometry"/>
+                </mxCell>
+                <mxCell id="s4" value="&lt;b&gt;阶段四：结果数据持久化与缓存复用&lt;/b&gt;&lt;br&gt;设计点响应入库 · caseHash/designHash 去重 · 跨次运行样本复用&lt;br&gt;GearOptResultDatabase（global 总库 + runSession 运行库）" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=10;strokeColor=#000000;fillColor=#EEEEEE;fontFamily=SimSun;fontSize=12;fontColor=#000000;align=center;verticalAlign=middle;spacingTop=4;spacingBottom=4;" parent="1" vertex="1">
+                    <mxGeometry x="120" y="438" width="520" height="78" as="geometry"/>
+                </mxCell>
+                <mxCell id="s5_num" value="⑤" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=18;fontFamily=SimSun;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="68" y="558" width="36" height="36" as="geometry"/>
+                </mxCell>
+                <mxCell id="s5" value="&lt;b&gt;阶段五：智能多目标优化演化&lt;/b&gt;&lt;br&gt;NSGA-II 非支配排序 · SBX/变异 · 约束修复 · 超体积收敛判定&lt;br&gt;可选 RBF 代理辅助：样本训练 → 代理寻优 → 稀疏加点 CCX 验证" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#000000;fillColor=#FFFFFF;fontFamily=SimSun;fontSize=12;fontColor=#000000;align=center;verticalAlign=middle;spacingTop=4;spacingBottom=4;" parent="1" vertex="1">
+                    <mxGeometry x="120" y="548" width="520" height="72" as="geometry"/>
+                </mxCell>
+                <mxCell id="s6_num" value="⑥" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=18;fontFamily=SimSun;fontStyle=1;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="68" y="668" width="36" height="36" as="geometry"/>
+                </mxCell>
+                <mxCell id="s6" value="&lt;b&gt;阶段六：优化结果输出与可视化展示&lt;/b&gt;&lt;br&gt;Pareto 前沿解集 · 全代历史对比 · 几何/云图预览 · CSV/Excel 报告导出&lt;br&gt;GearOptResultViewer · GearOptCompareTable · ParaView(VTU)" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#000000;fillColor=#F7F7F7;fontFamily=SimSun;fontSize=12;fontColor=#000000;align=center;verticalAlign=middle;spacingTop=4;spacingBottom=4;" parent="1" vertex="1">
+                    <mxGeometry x="120" y="658" width="520" height="72" as="geometry"/>
+                </mxCell>
+                <mxCell id="a12" style="edgeStyle=none;rounded=0;html=1;strokeColor=#000000;endArrow=classic;endFill=1;strokeWidth=1.5;" parent="1" source="s1" target="s2" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="a23" style="edgeStyle=none;rounded=0;html=1;strokeColor=#000000;endArrow=classic;endFill=1;strokeWidth=1.5;" parent="1" source="s2" target="s3" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="a34" style="edgeStyle=none;rounded=0;html=1;strokeColor=#000000;endArrow=classic;endFill=1;strokeWidth=1.5;" parent="1" source="s3" target="s4" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="a45" style="edgeStyle=none;rounded=0;html=1;strokeColor=#000000;endArrow=classic;endFill=1;strokeWidth=1.5;" parent="1" source="s4" target="s5" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="a56" style="edgeStyle=none;rounded=0;html=1;strokeColor=#000000;endArrow=classic;endFill=1;strokeWidth=1.5;" parent="1" source="s5" target="s6" edge="1">
+                    <mxGeometry relative="1" as="geometry"/>
+                </mxCell>
+                <mxCell id="loop53" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#000000;endArrow=classic;endFill=1;strokeWidth=1.2;dashed=1;dashPattern=6 4;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="s5" target="s3" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="660" y="584"/>
+                            <mxPoint x="660" y="364"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="loop53_l" value="未收敛：&lt;br&gt;下一代个体评估" style="edgeLabel;html=1;align=left;verticalAlign=middle;resizable=0;points=[];fontFamily=SimSun;fontSize=10;labelBackgroundColor=#FFFFFF;fontColor=#000000;" parent="loop53" vertex="1" connectable="0">
+                    <mxGeometry x="0.1" y="-1" relative="1" as="geometry">
+                        <mxPoint x="8" y="-8" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="loop45" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;strokeColor=#000000;endArrow=classic;endFill=1;strokeWidth=1.2;dashed=1;dashPattern=6 4;exitX=0;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" parent="1" source="s4" target="s5" edge="1">
+                    <mxGeometry relative="1" as="geometry">
+                        <Array as="points">
+                            <mxPoint x="88" y="477"/>
+                            <mxPoint x="88" y="584"/>
+                        </Array>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="loop45_l" value="历史样本&lt;br&gt;支撑代理训练" style="edgeLabel;html=1;align=right;verticalAlign=middle;resizable=0;points=[];fontFamily=SimSun;fontSize=10;labelBackgroundColor=#FFFFFF;fontColor=#000000;" parent="loop45" vertex="1" connectable="0">
+                    <mxGeometry x="-0.1" y="1" relative="1" as="geometry">
+                        <mxPoint x="-8" y="-8" as="offset"/>
+                    </mxGeometry>
+                </mxCell>
+                <mxCell id="note" value="说明：各阶段由主控调度管理器串行/迭代调度，形成「配置 → 分析 → 入库 → 寻优 → 输出」的全闭环数据流；&lt;br&gt;SQLite 样本库贯穿阶段三～五，实现跨工况缓存与代理辅助优化的数据互锁。" style="rounded=0;whiteSpace=wrap;html=1;strokeColor=#000000;fillColor=#FFF8E1;fontFamily=SimSun;fontSize=11;align=left;verticalAlign=top;spacingLeft=10;spacingTop=8;fontColor=#000000;" parent="1" vertex="1">
+                    <mxGeometry x="60" y="760" width="600" height="56" as="geometry"/>
+                </mxCell>
+                <mxCell id="footer" value="GearAutoOptManager · GearOptCaseRunner · GearOptResultDatabase · NSGA2 · GearSurrogateModel" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=10;fontFamily=Consolas;fontColor=#666666;" parent="1" vertex="1">
+                    <mxGeometry x="80" y="941" width="560" height="20" as="geometry"/>
+                </mxCell>
+            </root>
+        </mxGraphModel>
+    </diagram>
+</mxfile>

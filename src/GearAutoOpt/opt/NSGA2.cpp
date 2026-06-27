@@ -1,6 +1,9 @@
 // UTF-8 BOM
 #include "NSGA2.h"
 
+#include "GearAutoOpt/data/GearOptGeometryBridge.h"
+
+#include <QDebug>
 #include <QMap>
 #include <algorithm>
 #include <cassert>
@@ -34,6 +37,23 @@ static double snapBounds(double val, const Bounds& b) {
     double v = clamp(val, b.lower, b.upper);
     if (b.isInteger) v = std::round(v);
     return v;
+}
+
+static QString fmtGearOptDpFields(const GearDesignPoint& dp)
+{
+    return QStringLiteral("module=%1, z1=%2, z2=%3, alpha=%4, x1=%5, x2=%6, ca1=%7, lca1=%8, ca2=%9, lca2=%10, commonWidth=%11, hubRatio=%12")
+        .arg(dp.module, 0, 'g', 8)
+        .arg(dp.z1)
+        .arg(dp.z2)
+        .arg(dp.alpha, 0, 'g', 8)
+        .arg(dp.x1, 0, 'g', 8)
+        .arg(dp.x2, 0, 'g', 8)
+        .arg(dp.ca1, 0, 'g', 8)
+        .arg(dp.lca1, 0, 'g', 8)
+        .arg(dp.ca2, 0, 'g', 8)
+        .arg(dp.lca2, 0, 'g', 8)
+        .arg(dp.commonWidth, 0, 'g', 8)
+        .arg(dp.hubRatio, 0, 'g', 8);
 }
 
 // ================================================================
@@ -72,9 +92,10 @@ GearDesignPoint Individual::toDesignPoint(int id, int generation) const {
         dp.lca1     = vars[VAR_LCA1];
         dp.ca2      = vars[VAR_CA2];
         dp.lca2     = vars[VAR_LCA2];
-        dp.width    = vars[VAR_WIDTH];
-        dp.hubRatio = vars[VAR_HUBRATIO];
+        dp.commonWidth = vars[VAR_COMMON_WIDTH];
+        dp.hubRatio    = vars[VAR_HUBRATIO];
     }
+    dp.syncPairGearWidth();
     return dp;
 }
 
@@ -91,12 +112,12 @@ Individual Individual::fromDesignPoint(const GearDesignPoint& dp, const GearOptC
     ind.vars[VAR_LCA1]     = dp.lca1;
     ind.vars[VAR_CA2]      = dp.ca2;
     ind.vars[VAR_LCA2]     = dp.lca2;
-    ind.vars[VAR_WIDTH]    = dp.width;
-    ind.vars[VAR_HUBRATIO] = dp.hubRatio;
+    ind.vars[VAR_COMMON_WIDTH] = dp.commonWidth;
+    ind.vars[VAR_HUBRATIO]     = dp.hubRatio;
 
-    if (dp.sigmaMax >= 0 && dp.mass >= 0) {
-        ind.objs.append(dp.sigmaMax);
-        ind.objs.append(dp.mass);
+    if (dp.cpressMax_MPa > 0.0 && dp.edgeLoadRatio > 0.0) {
+        ind.objs.append(dp.cpressMax_MPa);
+        ind.objs.append(dp.edgeLoadRatio);
         ind.evaluated = true;
     }
     return ind;
@@ -186,6 +207,21 @@ Population initLatin(int N, const GearOptConfig& cfg, int seed) {
     // 修复所有个体
     for (auto& ind : pop)
         repairAndEval(ind, cfg);
+
+    if (cfg.useOptimizationBase) {
+        pop[0] = Individual::fromDesignPoint(cfg.optimizationBase, cfg);
+        repairAndEval(pop[0], cfg);
+    }
+
+    for (int j = 0; j < N; ++j) {
+        const GearDesignPoint dp = pop[j].toDesignPoint(j, 0);
+        checkGearOptDesignPointBounds(dp, cfg);
+        const char* tag = (cfg.useOptimizationBase && j == 0) ? "BASE" : "SAMPLE";
+        qDebug().noquote() << QStringLiteral("[GearOpt][InitPop] id=%1 %2 %3")
+                                  .arg(j)
+                                  .arg(QLatin1String(tag))
+                                  .arg(fmtGearOptDpFields(dp));
+    }
 
     return pop;
 }

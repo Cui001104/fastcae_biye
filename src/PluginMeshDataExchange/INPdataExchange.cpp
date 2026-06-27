@@ -18,9 +18,11 @@
 #include "Material/MaterialSingletion.h"
 #include "ModuleBase/ThreadTaskManager.h"
 #include <vtkUnstructuredGrid.h>
+#include <vtkCell3D.h>
 #include <QFileInfo>
 #include <QMessageBox>
 #include <QDebug>
+#include <QSet>
 #include <omp.h>
 #include <QFileDialog>
 
@@ -32,6 +34,137 @@
 
 namespace
 {
+	// Abaqus/CalculiX C3D4：S1=1,2,3 S2=1,4,2 S3=2,4,3 S4=3,4,1（0-based 局部索引）
+	static const int kC3D4LocalFaces[4][3] = {
+	    {0, 1, 2},
+	    {0, 3, 1},
+	    {1, 3, 2},
+	    {2, 3, 0},
+	};
+
+	static QSet<vtkIdType> vtkFacePointIdSet(vtkCell *face)
+	{
+		QSet<vtkIdType> out;
+		if (face == nullptr)
+			return out;
+		vtkIdList *pids = face->GetPointIds();
+		if (pids == nullptr)
+			return out;
+		const vtkIdType n = pids->GetNumberOfIds();
+		for (vtkIdType i = 0; i < n; ++i)
+			out.insert(pids->GetId(i));
+		return out;
+	}
+
+	static int abaqusC3D4FaceIndexFromLabel(const QString &faceLabel)
+	{
+		QString L = faceLabel.trimmed().toUpper();
+		if (!L.startsWith(QLatin1Char('S')))
+			return -1;
+		bool ok = false;
+		const int n = L.mid(1).toInt(&ok);
+		if (!ok || n < 1 || n > 4)
+			return -1;
+		return n - 1;
+	}
+
+	static QSet<vtkIdType> abaqusTetraFacePointIds(vtkCell *cell, int abqFaceIndex0)
+	{
+		QSet<vtkIdType> out;
+		if (cell == nullptr || abqFaceIndex0 < 0 || abqFaceIndex0 >= 4)
+			return out;
+		vtkIdList *pids = cell->GetPointIds();
+		if (pids == nullptr || pids->GetNumberOfIds() < 4)
+			return out;
+		for (int k = 0; k < 3; ++k) {
+			const int li = kC3D4LocalFaces[abqFaceIndex0][k];
+			if (li < 0 || li >= pids->GetNumberOfIds())
+				return QSet<vtkIdType>();
+			out.insert(pids->GetId(li));
+		}
+		return out;
+	}
+
+	static void logAbaqusSurfaceFaceMatchDebug(vtkCell *cell, const QString &faceLabel, int elemId)
+	{
+		if (cell == nullptr || cell->GetCellType() != VTK_TETRA)
+			return;
+		qDebug().noquote() << QStringLiteral("[INP][Surface] C3D4 face match failed eid=%1 label=%2")
+		                              .arg(elemId)
+		                              .arg(faceLabel);
+		vtkIdList *pids = cell->GetPointIds();
+		if (pids != nullptr) {
+			QStringList corners;
+			for (vtkIdType i = 0; i < pids->GetNumberOfIds(); ++i)
+				corners << QString::number(pids->GetId(i));
+			qDebug().noquote() << QStringLiteral("  cell point ids:") << corners.join(QLatin1Char(','));
+		}
+		const int abqFi = abaqusC3D4FaceIndexFromLabel(faceLabel);
+		if (abqFi >= 0) {
+			const QSet<vtkIdType> want = abaqusTetraFacePointIds(cell, abqFi);
+			QStringList w;
+			for (vtkIdType id : want)
+				w << QString::number(id);
+			qDebug().noquote() << QStringLiteral("  Abaqus %1 point ids:").arg(faceLabel.toUpper())
+			                              << w.join(QLatin1Char(','));
+		}
+		vtkCell3D *c3d = vtkCell3D::SafeDownCast(cell);
+		if (c3d == nullptr)
+			return;
+		for (int fi = 0; fi < c3d->GetNumberOfFaces(); ++fi) {
+			vtkCell *face = c3d->GetFace(fi);
+			const QSet<vtkIdType> got = vtkFacePointIdSet(face);
+			QStringList g;
+			for (vtkIdType id : got)
+				g << QString::number(id);
+			qDebug().noquote() << QStringLiteral("  VTK face %1 point ids:").arg(fi) << g.join(QLatin1Char(','));
+		}
+	}
+
+	/// 按 Abaqus S* 局部角点与 VTK GetFace(i) 角点集合匹配，返回 vtkFaceIndex。
+	static int abaqusSurfaceToVtkFaceIndex(vtkCell *cell, const QString &faceLabel, int elemIdForLog = -1)
+	{
+		if (cell == nullptr)
+			return -1;
+
+		if (cell->GetCellType() == VTK_TETRA) {
+			const int abqFi = abaqusC3D4FaceIndexFromLabel(faceLabel);
+			if (abqFi < 0)
+				return -1;
+			const QSet<vtkIdType> want = abaqusTetraFacePointIds(cell, abqFi);
+			if (want.size() != 3)
+				return -1;
+			vtkCell3D *c3d = vtkCell3D::SafeDownCast(cell);
+			if (c3d == nullptr)
+				return -1;
+			for (int fi = 0; fi < c3d->GetNumberOfFaces(); ++fi) {
+				vtkCell *face = c3d->GetFace(fi);
+				if (vtkFacePointIdSet(face) == want)
+					return fi;
+			}
+			if (elemIdForLog > 0)
+				logAbaqusSurfaceFaceMatchDebug(cell, faceLabel, elemIdForLog);
+			return -1;
+		}
+
+		QString L = faceLabel.trimmed().toUpper();
+		if (!L.startsWith(QLatin1Char('S')))
+			return -1;
+		bool ok = false;
+		const int n = L.mid(1).toInt(&ok);
+		if (!ok || n < 1)
+			return -1;
+		const int idx = n - 1;
+		switch (cell->GetCellType()) {
+		case VTK_HEXAHEDRON:
+			return (idx >= 0 && idx < 6) ? idx : -1;
+		case VTK_WEDGE:
+			return (idx >= 0 && idx < 5) ? idx : -1;
+		default:
+			return -1;
+		}
+	}
+
 	QString abaqusFaceLabel(vtkCell *c, int vtkFaceIdx)
 	{
 		if (c == nullptr)
@@ -47,8 +180,20 @@ namespace
 		break;
 		case VTK_TETRA:
 		{
-			static const char *labels[] = {"S1", "S2", "S3", "S4"};
-			if (vtkFaceIdx >= 0 && vtkFaceIdx < 4)
+			vtkCell3D *c3d = vtkCell3D::SafeDownCast(c);
+			if (c3d == nullptr || vtkFaceIdx < 0 || vtkFaceIdx >= c3d->GetNumberOfFaces())
+				break;
+			const QSet<vtkIdType> got = vtkFacePointIdSet(c3d->GetFace(vtkFaceIdx));
+			for (int abq = 0; abq < 4; ++abq) {
+				if (abaqusTetraFacePointIds(c, abq) == got)
+					return QStringLiteral("S") + QString::number(abq + 1);
+			}
+		}
+		break;
+		case VTK_WEDGE:
+		{
+			static const char *labels[] = {"S1", "S2", "S3", "S4", "S5"};
+			if (vtkFaceIdx >= 0 && vtkFaceIdx < 5)
 				return QString::fromLatin1(labels[vtkFaceIdx]);
 		}
 		break;
@@ -56,6 +201,11 @@ namespace
 			break;
 		}
 		return QStringLiteral("S1");
+	}
+
+	int abaqusFaceToVtkIndex(vtkCell *c, const QString &faceLabel)
+	{
+		return abaqusSurfaceToVtkFaceIndex(c, faceLabel, -1);
 	}
 
 	QString abaqusSurfName(const QString &s)
@@ -165,6 +315,9 @@ namespace MeshData
 		QStringList bcSetIds, bcName, bcType;
 		QList<double> displacement, rotation;
 
+		bool holdLine       = false;  // readElement/readNode 在下一卡片行 break 时保留 line
+		bool kernelAppended = false;
+
 		do
 		{
 			if (!_threadRuning)
@@ -172,7 +325,11 @@ namespace MeshData
 				file.close();
 				return false;
 			}
-			this->readLine(line);
+			if (!holdLine)
+				this->readLine(line);
+			else
+				holdLine = false;
+
 			if (line.startsWith("*node") /*&& line.size() < 6*/)
 			{
 				// 				if (!readNodes(dataset, line))
@@ -188,16 +345,11 @@ namespace MeshData
 					file.close();
 					return false;
 				}
+				if (line.startsWith(QLatin1Char('*')))
+					holdLine = true;
 			}
 			if (line.startsWith("*element"))
 			{
-				// 				if (!readElements(dataset, line))
-				// 				{
-				// 					delete k;
-				// 					dataset->Delete();
-				// 					file.close();
-				// 					return false;
-				// 				}
 				if (!readElement(dataset, line, inpSetIds, k))
 				{
 					delete k;
@@ -206,14 +358,31 @@ namespace MeshData
 					return false;
 				}
 
-				if (dataset != nullptr)
+				if (line.startsWith(QLatin1Char('*')))
+					holdLine = true;
+
+				// 须在 *ELSET/*NSET 之前注册 MeshKernal；同一 dataset 后续 *ELEMENT 块继续追加单元
+				if (dataset != nullptr && !kernelAppended)
 				{
-					/*MeshKernal* k = new MeshKernal;*/
 					k->setName(name);
 					k->setPath(path);
 					k->setMeshData((vtkDataSet *)dataset);
 					_meshData->appendMeshKernal(k);
+					kernelAppended = true;
 				}
+			}
+			if (line.startsWith("*surface"))
+			{
+				if (!readSurface(line, inpSetIds))
+				{
+					delete k;
+					dataset->Delete();
+					file.close();
+					return false;
+				}
+				if (line.startsWith(QLatin1Char('*')))
+					holdLine = true;
+				continue;
 			}
 			if (line.startsWith("*nset"))
 			{
@@ -236,6 +405,15 @@ namespace MeshData
 				readBoundary(line, bcSetIds, bcName, bcType, displacement, rotation);
 
 		} while (_threadRuning && !_stream->atEnd());
+
+		if (dataset != nullptr && !kernelAppended && dataset->GetNumberOfCells() > 0)
+		{
+			k->setName(name);
+			k->setPath(path);
+			k->setMeshData((vtkDataSet *)dataset);
+			_meshData->appendMeshKernal(k);
+			kernelAppended = true;
+		}
 
 		if (_modelId != -1)
 		{
@@ -442,22 +620,31 @@ namespace MeshData
 			{
 				tp = VTK_TETRA;
 			}
-			else if (st == "f3d8")
+			else if (st == "c3d8" || st == "f3d8")
 			{
 				tp = VTK_HEXAHEDRON;
+			}
+			else if (st == "c3d6")
+			{
+				tp = VTK_WEDGE;
 			}
 
 			if (tp == VTK_EMPTY_CELL)
 				return false;
 
 			QStringList sinfo = line.split(",");
-			QString name = sinfo.at(1).simplified();
-			name.remove("elset=");
+			QString       name;
+			for (const QString& part : sinfo) {
+				const QString p = part.simplified();
+				if (p.startsWith(QLatin1String("elset="), Qt::CaseInsensitive))
+					name = p.mid(6);
+			}
+			if (name.isEmpty())
+				return false;
 
 			MeshSet *set = new MeshSet(name, Element);
 
 			bool ok = false;
-			int index = 0;
 
 			while (_threadRuning && !_stream->atEnd())
 			{
@@ -477,12 +664,12 @@ namespace MeshData
 					indexList->InsertNextId(nodeindex);
 				}
 
+				const int cellIdx = g->GetNumberOfCells();
 				g->InsertNextCell(tp, indexList);
 				int eleID = sids.at(0).toInt(&ok);
-				_elemIDIndex[eleID] = index;
-				index++;
+				_elemIDIndex[eleID] = cellIdx;
 
-				set->appendMember(kid, index);
+				set->appendMember(kid, cellIdx);
 			}
 
 			_meshData->appendMeshSet(set);
@@ -506,16 +693,19 @@ namespace MeshData
 		{
 			tp = VTK_TETRA;
 		}
-		else if (st == "f3d8")
+		else if (st == "c3d8" || st == "f3d8")
 		{
 			tp = VTK_HEXAHEDRON;
+		}
+		else if (st == "c3d6")
+		{
+			tp = VTK_WEDGE;
 		}
 
 		if (tp == VTK_EMPTY_CELL)
 			return false;
 
 		bool ok = false;
-		int index = 0;
 
 		while (_threadRuning && !_stream->atEnd())
 		{
@@ -535,10 +725,10 @@ namespace MeshData
 				indexList->InsertNextId(nodeindex);
 			}
 
+			const int cellIdx = g->GetNumberOfCells();
 			g->InsertNextCell(tp, indexList);
 			int eleID = sids.at(0).toInt(&ok);
-			_elemIDIndex[eleID] = index;
-			index++;
+			_elemIDIndex[eleID] = cellIdx;
 
 			// xuxinwie  20200519
 			// 			if (_stream->atEnd())
@@ -572,6 +762,7 @@ namespace MeshData
 		const int kid = k->getID();
 
 		//		vtkSmartPointer<vtkIdTypeArray> array = vtkSmartPointer<vtkIdTypeArray>::New();
+		bool committed = false;
 		while (_threadRuning && !_stream->atEnd())
 		{
 			if (!_threadRuning)
@@ -582,6 +773,7 @@ namespace MeshData
 				//				set->setIDList(array);
 				_meshData->appendMeshSet(set);
 				inpSetIds.append(set->getID());
+				committed = true;
 			}
 			if (line.startsWith("*nset"))
 			{
@@ -620,6 +812,96 @@ namespace MeshData
 				set->appendMember(kid, index);
 			}
 		}
+		// 文件在 *NSET 数据末尾结束（无后续 * 行）时不会触发上面的 append；GearOpt 追加的 NSET_TOOTH 常落在文件末尾。
+		if (!committed)
+		{
+			_meshData->appendMeshSet(set);
+			inpSetIds.append(set->getID());
+		}
+		return true;
+	}
+
+	bool INPdataExchange::readSurface(QString &line, QList<int> &inpSetIds)
+	{
+		QString name;
+		for (const QString &part : line.split(QLatin1Char(',')))
+		{
+			const QString p = part.simplified();
+			if (p.startsWith(QLatin1String("name=")))
+				name = p.mid(5);
+		}
+		if (name.isEmpty())
+		{
+			while (_threadRuning && !_stream->atEnd())
+			{
+				readLine(line);
+				if (line.startsWith(QLatin1Char('*')))
+					return true;
+			}
+			return true;
+		}
+
+		const int c = _meshData->getKernalCount();
+		if (c <= 0)
+			return false;
+		MeshKernal *k = _meshData->getKernalAt(c - 1);
+		if (k == nullptr)
+			return false;
+		const int kid = k->getID();
+		vtkDataSet *dataset = k->getMeshData();
+
+		auto *set = new BoundMeshSet;
+		set->setName(name);
+		set->setType(UserDef);
+		QMap<int, QVector<int>> cellFaces;
+
+		while (_threadRuning && !_stream->atEnd())
+		{
+			readLine(line);
+			if (line.startsWith(QLatin1Char('*')))
+			{
+				if (!cellFaces.isEmpty())
+				{
+					set->setCellFaces(cellFaces);
+					for (int cellIdx : cellFaces.keys())
+						set->appendMember(kid, cellIdx);
+					_meshData->appendMeshSet(set);
+					inpSetIds.append(set->getID());
+				}
+				else
+					delete set;
+				return true;
+			}
+
+			const QStringList toks = line.split(QLatin1Char(','), QString::SkipEmptyParts);
+			if (toks.size() < 2)
+				continue;
+			bool ok = false;
+			const int eid = toks.at(0).simplified().toInt(&ok);
+			if (!ok || !_elemIDIndex.contains(eid))
+				continue;
+			const int cellIdx = _elemIDIndex.value(eid);
+			if (dataset == nullptr)
+				continue;
+			vtkCell *cell = dataset->GetCell(cellIdx);
+			const int fi = abaqusSurfaceToVtkFaceIndex(cell, toks.at(1).simplified(), eid);
+			if (fi < 0)
+				continue;
+			QVector<int> &faces = cellFaces[cellIdx];
+			if (!faces.contains(fi))
+				faces.append(fi);
+		}
+
+		if (!cellFaces.isEmpty())
+		{
+			set->setCellFaces(cellFaces);
+			for (int cellIdx : cellFaces.keys())
+				set->appendMember(kid, cellIdx);
+			_meshData->appendMeshSet(set);
+			inpSetIds.append(set->getID());
+		}
+		else
+			delete set;
 		return true;
 	}
 
@@ -647,6 +929,7 @@ namespace MeshData
 		const int kid = k->getID();
 
 		//		vtkSmartPointer<vtkIdTypeArray> array = vtkSmartPointer<vtkIdTypeArray>::New();
+		bool committed = false;
 		while (_threadRuning && !_stream->atEnd())
 		{
 			if (!_threadRuning)
@@ -657,6 +940,7 @@ namespace MeshData
 				//				set->setIDList(array);
 				_meshData->appendMeshSet(set);
 				inpSetIds.append(set->getID());
+				committed = true;
 			}
 			if (line.startsWith("*elset"))
 			{
@@ -694,6 +978,11 @@ namespace MeshData
 				//				array->InsertNextValue(index);
 				set->appendMember(kid, index);
 			}
+		}
+		if (!committed)
+		{
+			_meshData->appendMeshSet(set);
+			inpSetIds.append(set->getID());
 		}
 		return true;
 	}

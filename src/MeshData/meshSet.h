@@ -109,6 +109,7 @@ namespace MeshData
 	public:
 		BoundMeshSet();
 		~BoundMeshSet() = default;
+		void generateDisplayDataSet() override;
 		void setCellFaces(const QMap<int, QVector<int>> cellFaces);
 		QMap<int, QVector<int>> getCellFaces();
 	protected:

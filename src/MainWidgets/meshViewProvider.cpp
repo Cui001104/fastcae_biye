@@ -5,6 +5,8 @@
 #include "MeshData/meshSingleton.h"
 #include "MeshData/meshSet.h"
 #include "MeshData/meshKernal.h"
+#include <vtkPolyData.h>
+#include <vtkPolyDataMapper.h>
 #include "Settings/BusAPI.h"
 #include "Settings/GraphOption.h"
 #include <vtkActor.h>
@@ -36,6 +38,7 @@ namespace MainWidget
 
 	MeshViewProvider::~MeshViewProvider()
 	{
+		clearBoundMeshSetOverlay();
 		QList<MeshKernalViewObj *> viewObjs = _viewObjects.values();
 		for (auto obj : viewObjs)
 			delete obj;
@@ -75,12 +78,51 @@ namespace MainWidget
 		_preWindow->reRender();
 	}
 
+	void MeshViewProvider::showBoundMeshSetOverlay(MeshData::BoundMeshSet *set)
+	{
+		if (set == nullptr)
+			return;
+		clearBoundMeshSetOverlay();
+		set->generateDisplayDataSet();
+		vtkDataSet *ds = set->getDisplayDataSet();
+		vtkPolyData *poly = vtkPolyData::SafeDownCast(ds);
+		if (poly == nullptr || poly->GetNumberOfCells() <= 0)
+			return;
+		auto *mapper = vtkPolyDataMapper::New();
+		mapper->SetInputData(poly);
+		_boundSetActor = vtkActor::New();
+		_boundSetActor->SetMapper(mapper);
+		mapper->Delete();
+		QColor c = Setting::BusAPI::instance()->getGraphOption()->getHighLightColor();
+		_boundSetActor->GetProperty()->SetColor(c.redF(), c.greenF(), c.blueF());
+		_boundSetActor->GetProperty()->SetOpacity(0.92);
+		_boundSetActor->GetProperty()->SetEdgeVisibility(true);
+		_boundSetActor->GetProperty()->SetLineWidth(1.2);
+		_preWindow->AppendActor(_boundSetActor);
+	}
+
+	void MeshViewProvider::clearBoundMeshSetOverlay()
+	{
+		if (_boundSetActor == nullptr)
+			return;
+		_preWindow->RemoveActor(_boundSetActor);
+		_boundSetActor->Delete();
+		_boundSetActor = nullptr;
+	}
+
 	void MeshViewProvider::highLighMeshSet(MeshData::MeshSet *set)
 	{
 		if (set == nullptr)
 			return;
 		if (!set->isVisible())
 			return;
+		if (auto *bm = dynamic_cast<MeshData::BoundMeshSet *>(set))
+		{
+			showBoundMeshSetOverlay(bm);
+			_highLightSet = set;
+			_preWindow->reRender();
+			return;
+		}
 		QList<int> kids = set->getKernals();
 		MeshData::SetType type = set->getSetType();
 		QColor c = Setting::BusAPI::instance()->getGraphOption()->getHighLightColor();
@@ -106,6 +148,7 @@ namespace MainWidget
 
 	void MeshViewProvider::clearHighLight()
 	{
+		clearBoundMeshSetOverlay();
 		QList<MeshKernalViewObj *> vobjs = _viewObjects.values();
 		for (auto v : vobjs)
 			if (v->isKernalHighLight())
@@ -160,6 +203,18 @@ namespace MainWidget
 	{
 		if (set == nullptr)
 			return;
+		if (dynamic_cast<MeshData::BoundMeshSet *>(set) != nullptr)
+		{
+			if (_highLightSet == set)
+			{
+				if (set->isVisible())
+					showBoundMeshSetOverlay(dynamic_cast<MeshData::BoundMeshSet *>(set));
+				else
+					clearBoundMeshSetOverlay();
+			}
+			_preWindow->reRender();
+			return;
+		}
 		MeshData::SetType type = set->getSetType();
 		QList<int> kids = set->getKernals();
 		for (int kid : kids)
@@ -185,6 +240,14 @@ namespace MainWidget
 		auto meshSet = meshData->getMeshSetByID(setid);
 		if (meshSet == nullptr)
 			return;
+		if (_highLightSet == meshSet && dynamic_cast<MeshData::BoundMeshSet *>(meshSet) != nullptr)
+		{
+			QColor c = meshSet->getColor();
+			if (_boundSetActor != nullptr)
+				_boundSetActor->GetProperty()->SetColor(c.redF(), c.greenF(), c.blueF());
+			_preWindow->reRender();
+			return;
+		}
 		QColor c = meshSet->getColor();
 
 		QList<int> ks = meshSet->getKernals();
