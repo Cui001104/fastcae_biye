@@ -1,5 +1,6 @@
 ﻿#include "GearOptCaseRunner.h"
 #include "GearAutoOpt/data/GearOptLog.h"
+#include "GearAutoOpt/db/GearOptResultDatabase.h"
 #include "GearAutoOpt/solver/MeshConverter.h"
 #include "GearAutoOpt/solver/CCXInpWriter.h"
 #include "GearAutoOpt/solver/CCXSolverController.h"
@@ -601,6 +602,13 @@ bool GearOptCaseRunner::runGeometryStep(GearDesignPoint& dp) {
 
 	checkGearOptDesignPointBounds(dp, _config);
 
+	const int caseId = dp.id >= 0 ? dp.id : 0;
+	const QString caseH = GearOptResultDatabase::caseHash(dp);
+	emitLogNormal(QStringLiteral("[GearOpt][Geometry] case_id=%1 case_hash=%2 workDir=%3 geometryStepStarted=true")
+	                  .arg(caseId)
+	                  .arg(caseH)
+	                  .arg(workDir()));
+
 	// 上一次 run 的临时齿轮（如果还在）先清掉
 	cleanup();
 
@@ -634,14 +642,24 @@ bool GearOptCaseRunner::runGeometryStep(GearDesignPoint& dp) {
 	const bool ok = cmd->execute(); //执行齿轮命令
 	if (!ok) {
 		dp.errorMsg = QStringLiteral("GeoCommandCreateGear::execute() failed");
+		emitLogNormal(QStringLiteral("[GearOpt][Geometry] case_id=%1 case_hash=%2 workDir=%3 geometryStepFinished=false createdShapeCount=0 shapeNames=")
+		                  .arg(caseId)
+		                  .arg(caseH)
+		                  .arg(workDir()));
 		delete cmd; //删除齿轮命令
 		return false;
 	}
 
 	const int afterCount = geoData->getGeometrySetCount(); //获取几何集数量
+	const int createdCount = afterCount - beforeCount;
 	if (afterCount != beforeCount + 2) {
 		dp.errorMsg = QString("expected geometry set count +2, got +%1")
-		              .arg(afterCount - beforeCount);
+		              .arg(createdCount);
+		emitLogNormal(QStringLiteral("[GearOpt][Geometry] case_id=%1 case_hash=%2 workDir=%3 geometryStepFinished=false createdShapeCount=%4 shapeNames=")
+		                  .arg(caseId)
+		                  .arg(caseH)
+		                  .arg(workDir())
+		                  .arg(createdCount));
 		delete cmd;
 		return false;
 	}
@@ -651,6 +669,17 @@ bool GearOptCaseRunner::runGeometryStep(GearDesignPoint& dp) {
 	_set1 = geoData->getGeometrySetAt(afterCount - 2);
 	_set2 = geoData->getGeometrySetAt(afterCount - 1);
 	_geomCmd = cmd;
+
+	const QString shapeNames =
+	    QStringLiteral("%1|%2")
+	        .arg(_set1 ? _set1->getName() : QStringLiteral("?"))
+	        .arg(_set2 ? _set2->getName() : QStringLiteral("?"));
+	emitLogNormal(QStringLiteral("[GearOpt][Geometry] case_id=%1 case_hash=%2 workDir=%3 geometryStepFinished=true createdShapeCount=%4 shapeNames=%5")
+	                  .arg(caseId)
+	                  .arg(caseH)
+	                  .arg(workDir())
+	                  .arg(createdCount)
+	                  .arg(shapeNames));
 
 	emitLog(QString("geometry: 2 GeometrySets created (%1 / %2)")
 	        .arg(_set1 ? _set1->getName() : QStringLiteral("?"))
@@ -682,8 +711,17 @@ QString GearOptCaseRunner::detectGmshPath() {
 }
 
 bool GearOptCaseRunner::runMeshStep(GearDesignPoint& dp) {
+	const int caseId = dp.id >= 0 ? dp.id : 0;
+	const QString caseH = GearOptResultDatabase::caseHash(dp);
+	emitLogNormal(QStringLiteral("[GearOpt][Mesh] case_id=%1 case_hash=%2 workDir=%3 meshStepStarted=true")
+	                  .arg(caseId)
+	                  .arg(caseH)
+	                  .arg(workDir()));
+
 	if (!_set1) {
 		dp.errorMsg = QStringLiteral("runMeshStep: _set1 is null (geometry step missing?)");
+		emitLogNormal(QStringLiteral("[GearOpt][Mesh] case_id=%1 case_hash=%2 workDir=%3 meshStepFinished=false")
+		                  .arg(caseId).arg(caseH).arg(workDir()));
 		return false;
 	}
 	TopoDS_Shape* shape1Ptr = _set1->getShape();
@@ -961,6 +999,13 @@ bool GearOptCaseRunner::runMeshStep(GearDesignPoint& dp) {
 	}
 
 	recordMeshStatsOnDesignPoint(dp, meshInp, meshSize, meshAuto);
+
+	emitLogNormal(QStringLiteral("[GearOpt][Mesh] case_id=%1 case_hash=%2 workDir=%3 meshStepFinished=true nodes=%4 elements=%5")
+	                  .arg(caseId)
+	                  .arg(caseH)
+	                  .arg(workDir())
+	                  .arg(dp.nodeCount)
+	                  .arg(dp.elementCount));
 
 	emitLogNormal(QStringLiteral("[Mesh] Done: nodes=%1 elements=%2")
 	                  .arg(dp.nodeCount)
@@ -1443,9 +1488,14 @@ bool GearOptCaseRunner::runInpWriteStep(GearDesignPoint& dp) {
 
 // QEventLoop 把异步的 processFinish 信号包成同步调用，让 runOne() 保持线性流程。
 bool GearOptCaseRunner::runSolveStep(GearDesignPoint& dp) {
+	const int caseId = dp.id >= 0 ? dp.id : 0;
+	const QString caseH = GearOptResultDatabase::caseHash(dp);
+
 	const QString ccxPath = CCXSolverController::detectCcxPath();
 	if (ccxPath.isEmpty()) {
 		dp.errorMsg = QStringLiteral("runSolveStep: ccx_MT.exe not found; set CCX_PATH or place at tools/calculix/ccx_MT.exe");
+		emitLogNormal(QStringLiteral("[GearOpt][CCX] case_id=%1 case_hash=%2 workDir=%3 solverStarted=false solverFinished=false")
+		                  .arg(caseId).arg(caseH).arg(workDir()));
 		return false;
 	}
 
@@ -1476,9 +1526,12 @@ bool GearOptCaseRunner::runSolveStep(GearDesignPoint& dp) {
 	        });
 
 	const qint64 t0ms = QDateTime::currentMSecsSinceEpoch();
-	emitLogNormal(QStringLiteral("[CCX] Solver started"));
+	emitLogNormal(QStringLiteral("[GearOpt][CCX] case_id=%1 case_hash=%2 workDir=%3 solverStarted=true")
+	                  .arg(caseId).arg(caseH).arg(workDir()));
 	if (!ctl->start()) {
 		dp.errorMsg = QStringLiteral("runSolveStep: CCXSolverController::start() failed (check ccx_MT.exe path / job.inp)");
+		emitLogNormal(QStringLiteral("[GearOpt][CCX] case_id=%1 case_hash=%2 workDir=%3 solverFinished=false")
+		                  .arg(caseId).arg(caseH).arg(workDir()));
 		emitLogNormal(QStringLiteral("[CCX][Error] Solver failed, see ccx_output.log"));
 		return false;
 	}
@@ -1493,9 +1546,16 @@ bool GearOptCaseRunner::runSolveStep(GearDesignPoint& dp) {
 		dp.errorMsg = QString("CCX: %1%2")
 		              .arg(failureReasonToString(reason))
 		              .arg(firstError.isEmpty() ? QString() : QStringLiteral(" – ") + firstError);
+		emitLogNormal(QStringLiteral("[GearOpt][CCX] case_id=%1 case_hash=%2 workDir=%3 solverFinished=false")
+		                  .arg(caseId).arg(caseH).arg(workDir()));
 		emitLogNormal(QStringLiteral("[CCX][Error] Solver failed, see ccx_output.log"));
 		return false;
 	}
+	emitLogNormal(QStringLiteral("[GearOpt][CCX] case_id=%1 case_hash=%2 workDir=%3 solverFinished=true converged=true time=%4 s")
+	                  .arg(caseId)
+	                  .arg(caseH)
+	                  .arg(workDir())
+	                  .arg(dp.solverTime, 0, 'f', 1));
 	emitLogNormal(QStringLiteral("[CCX] Done: converged=true time=%1 s")
 	                  .arg(dp.solverTime, 0, 'f', 1));
 	return true;

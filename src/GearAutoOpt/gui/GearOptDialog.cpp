@@ -1,7 +1,10 @@
 ﻿// UTF-8 BOM
 #include "GearOptDialog.h"
 #include "GearAutoOpt/runner/GearAutoOptManager.h"
+#include "GearAutoOpt/runner/GearOptMainThreadRunner.h"
 #include "GearAutoOpt/runner/MeshIndependenceRunner.h"
+#include "GearAutoOpt/tools/FailedCaseRetryRunner.h"
+#include "GearAutoOpt/tools/GearOptFailedCaseRetry.h"
 #include "GearOptResultViewer.h"
 #include "GearAutoOpt/data/GearOptGeometryBridge.h"
 #include "GearAutoOpt/gui/GearOptCompareTable.h"
@@ -11,6 +14,7 @@
 
 #include <algorithm>
 #include <QAbstractItemView>
+#include <QApplication>
 #include <QCheckBox>
 #include <QCloseEvent>
 #include <QCoreApplication>
@@ -23,6 +27,7 @@
 #include <QLineEdit>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMetaType>
 #include <QMessageBox>
 #include <QDebug>
 #include <QHeaderView>
@@ -48,10 +53,13 @@ namespace GearAutoOpt {
 GearOptDialog::GearOptDialog(QWidget* parent)
     : QDialog(parent)
 {
+    qRegisterMetaType<GearAutoOpt::FailedCaseRetryStats>("GearAutoOpt::FailedCaseRetryStats");
     setWindowTitle(QString::fromUtf8("齿轮多目标优化"));
     setMinimumSize(620, 520);
     resize(620, 520);
     buildUi();
+
+    GearOptMainThreadRunner::ensureInstance(this);
 
 #if GEAR_OPT_DEBUG_SQL_DRIVERS
 	// 仅打开对话框即打印，无需点「开始优化」；看 VS「输出」或 DebugView
@@ -79,6 +87,10 @@ GearOptDialog::~GearOptDialog() {
 		_meshIndepThread->quit();
 		_meshIndepThread->wait(300000);
 	}
+	if (_retryThread && _retryThread->isRunning()) {
+		_retryThread->quit();
+		_retryThread->wait(300000);
+	}
 }
 
 void GearOptDialog::closeEvent(QCloseEvent* event) {
@@ -91,6 +103,12 @@ void GearOptDialog::closeEvent(QCloseEvent* event) {
 	if (_meshIndepThread && _meshIndepThread->isRunning()) {
 		QMessageBox::warning(this, QString::fromUtf8("提示"),
 		                     QString::fromUtf8("网格无关性验证仍在运行，请等待结束后再关闭窗口。"));
+		event->ignore();
+		return;
+	}
+	if (_retryThread && _retryThread->isRunning()) {
+		QMessageBox::warning(this, QString::fromUtf8("提示"),
+		                     QString::fromUtf8("失败样本重算仍在运行，请等待结束后再关闭窗口。"));
 		event->ignore();
 		return;
 	}
@@ -234,6 +252,7 @@ void GearOptDialog::buildUi() {
     _btnViewResult = new QPushButton(QString::fromUtf8("查看结果..."), this);
     _btnMetricConfig = new QPushButton(QString::fromUtf8("优化配置"), this);
     _btnBackfillCpress = new QPushButton(QString::fromUtf8("离线补算接触分布指标"), this);
+    _btnRetryFailed    = new QPushButton(QString::fromUtf8("Retry Failed Cases"), this);
     _btnExport     = new QPushButton(QString::fromUtf8("导出 Excel..."), this);
     _btnStop->setEnabled(false);
     _btnCompare->setEnabled(false);
@@ -247,6 +266,7 @@ void GearOptDialog::buildUi() {
     btnRow->addWidget(_btnViewResult);
     btnRow->addWidget(_btnMetricConfig);
     btnRow->addWidget(_btnBackfillCpress);
+    btnRow->addWidget(_btnRetryFailed);
     btnRow->addWidget(_btnExport);
     mainLayout->addLayout(btnRow);
 
@@ -400,6 +420,7 @@ void GearOptDialog::buildUi() {
     connect(_btnExport, &QPushButton::clicked, this, &GearOptDialog::onExport);
     connect(_btnMetricConfig, &QPushButton::clicked, this, &GearOptDialog::onMetricConfig);
     connect(_btnBackfillCpress, &QPushButton::clicked, this, &GearOptDialog::onOfflineBackfillCpress);
+    connect(_btnRetryFailed, &QPushButton::clicked, this, &GearOptDialog::onRetryFailedCases);
 }
 
 GearOptConfig GearOptDialog::currentConfig() const {
@@ -501,6 +522,7 @@ void GearOptDialog::setRunning(bool running) {
     if (_spinCcxThreadsPerJob)
         _spinCcxThreadsPerJob->setEnabled(!running && _chkParallelCcx && _chkParallelCcx->isChecked());
     if (_btnBackfillCpress) _btnBackfillCpress->setEnabled(!running);
+    if (_btnRetryFailed) _btnRetryFailed->setEnabled(!running);
 }
 
 void GearOptDialog::setMeshIndependenceRunning(bool running) {
@@ -695,7 +717,8 @@ void GearOptDialog::onMetricConfig()
 
 void GearOptDialog::onOfflineBackfillCpress()
 {
-	if ((_thread && _thread->isRunning()) || (_meshIndepThread && _meshIndepThread->isRunning())) {
+	if ((_thread && _thread->isRunning()) || (_meshIndepThread && _meshIndepThread->isRunning())
+	    || (_retryThread && _retryThread->isRunning())) {
 		QMessageBox::warning(this, QString::fromUtf8("提示"),
 		                     QString::fromUtf8("当前有计算任务正在运行，请结束后再补算历史库。"));
 		return;
@@ -735,6 +758,69 @@ void GearOptDialog::onOfflineBackfillCpress()
 	if (_log)
 		_log->append(QString::fromUtf8("[离线补算接触分布指标]\n") + msg);
 	QMessageBox::information(this, QString::fromUtf8("补算完成"), msg);
+}
+
+void GearOptDialog::onRetryFailedCases()
+{
+	if ((_thread && _thread->isRunning()) || (_meshIndepThread && _meshIndepThread->isRunning())) {
+		QMessageBox::warning(this, QString::fromUtf8("提示"),
+		                     QString::fromUtf8("当前有计算任务正在运行，请结束后再重算失败样本。"));
+		return;
+	}
+
+	const GearOptConfig cfg = currentConfig();
+	const QString runDir = cfg.solver.runBaseDir.trimmed();
+	if (runDir.isEmpty()) {
+		QMessageBox::warning(this, QString::fromUtf8("提示"),
+		                     QString::fromUtf8("请先设置结果目录。"));
+		return;
+	}
+
+	FailedCaseRetryOptions opt;
+	opt.cfg                = cfg;
+	opt.runDir             = runDir;
+	opt.fixedMeshSizeMm    = cfg.solver.meshSize;
+	opt.runMeshAuto        = cfg.solver.meshSize <= 0.0;
+	opt.baseCaseHash       = QString(); // 不过滤 base_case_hash，重算库中全部 failed
+	opt.fixedCommonWidthMm = -1.0;      // 不过滤齿宽
+
+	if (_log)
+		_log->append(QString::fromUtf8("[Retry] 开始重算 failed 样本（按数据库设计变量重新建模+CCX）…"));
+	if (_labelStatus)
+		_labelStatus->setText(QString::fromUtf8("失败样本重算中…"));
+	setRunning(true);
+	if (_btnRetryFailed) _btnRetryFailed->setEnabled(false);
+	QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+
+	const FailedCaseRetryStats stats = GearOptFailedCaseRetry::run(
+	    opt, [this](const QString& msg) {
+		    if (_log)
+			    _log->append(msg);
+		    QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+	    });
+
+	onRetryFailedCasesFinished(stats);
+}
+
+void GearOptDialog::onRetryFailedCasesFinished(const FailedCaseRetryStats& stats)
+{
+	setRunning(false);
+	if (_btnRetryFailed) _btnRetryFailed->setEnabled(true);
+	if (_labelStatus)
+		_labelStatus->setText(QString::fromUtf8("失败样本重算完成"));
+
+	const QString msg = QString::fromUtf8(
+	                        "total_failed = %1\n"
+	                        "retried = %2\n"
+	                        "fixed = %3\n"
+	                        "still_failed = %4")
+	                        .arg(stats.totalFailed)
+	                        .arg(stats.retried)
+	                        .arg(stats.fixed)
+	                        .arg(stats.stillFailed);
+	if (_log)
+		_log->append(QString::fromUtf8("[Retry] 完成\n") + msg);
+	QMessageBox::information(this, QString::fromUtf8("重算完成"), msg);
 }
 
 void GearOptDialog::onExport() {

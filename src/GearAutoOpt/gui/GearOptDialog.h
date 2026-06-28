@@ -4,7 +4,7 @@
 
 #include "GearAutoOpt/GearAutoOptAPI.h"
 #include "GearAutoOpt/data/GearOptConfig.h"
-#include "GearAutoOpt/data/GearDesignPoint.h"
+#include "GearAutoOpt/db/GearOptResultDatabase.h"
 
 #include <QDialog>
 #include <QPointer>
@@ -25,6 +25,7 @@ namespace GearAutoOpt {
 
 class GearAutoOptManager;
 class MeshIndependenceRunner;
+class FailedCaseRetryRunner;
 
 /// 齿轮多目标优化主对话框。
 class GEARAUTOOPTAPI GearOptDialog : public QDialog {
@@ -45,6 +46,8 @@ private slots:
     void onMeshIndependence();
     void onMeshIndependenceFinished(bool success, const QString& csvPath);
     void onOfflineBackfillCpress();
+    void onRetryFailedCases();
+    void onRetryFailedCasesFinished(const GearAutoOpt::FailedCaseRetryStats& stats);
     void onExport();
     void onMetricConfig();
     void onGenerationFinished(int gen, int paretoSize, double hv);
@@ -105,6 +108,7 @@ private:
     QPushButton*    _btnViewResult{};
     QPushButton*    _btnMetricConfig{};
     QPushButton*    _btnBackfillCpress{};
+    QPushButton*    _btnRetryFailed{};
     QPushButton*    _btnExport{};
 
     // 运行（QPointer 配合 deleteLater，避免悬空指针）
@@ -113,6 +117,9 @@ private:
 
     QPointer<MeshIndependenceRunner> _meshIndepRunner{};
     QPointer<QThread>                _meshIndepThread{};
+
+    QPointer<FailedCaseRetryRunner> _retryRunner{};
+    QPointer<QThread>                 _retryThread{};
 
     /// 最近一次「开始优化」时的配置与工作目录（用于对比表与 CSV）
     GearOptConfig _lastRunCfg{};

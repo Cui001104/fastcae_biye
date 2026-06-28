@@ -70,12 +70,76 @@ QString validatedSurrogateSampleWhereSql()
 {
 	return QStringLiteral(
 	    " status = 'done'"
+	    " AND converged = 1"
+	    " AND is_valid = 1"
 	    " AND verified_by_ccx = 1"
 	    " AND cpressMax_MPa > 0"
+	    " AND sigmaMax_MPa > 0"
+	    " AND uMax_mm >= 0"
+	    " AND mass_kg > 0"
 	    " AND edgeLoadRatio IS NOT NULL"
 	    " AND edgeLoadRatio > 0"
 	    " AND cpressCV IS NOT NULL"
 	    " AND cpressCV > 0");
+}
+
+bool computeConvergedFromMetrics(const GearDesignPoint& dp)
+{
+	return dp.status == PointStatus::Done
+	       && dp.cpressMax_MPa > 0.0 && std::isfinite(dp.cpressMax_MPa)
+	       && dp.sigmaMax > 0.0 && std::isfinite(dp.sigmaMax)
+	       && dp.uMax >= 0.0 && std::isfinite(dp.uMax)
+	       && dp.mass > 0.0 && std::isfinite(dp.mass)
+	       && dp.edgeLoadRatio > 0.0 && std::isfinite(dp.edgeLoadRatio)
+	       && dp.cpressCV > 0.0 && std::isfinite(dp.cpressCV);
+}
+
+int computeIsValidFlag(const GearDesignPoint& dp)
+{
+	if (dp.status == PointStatus::Failed)
+		return 0;
+	if (dp.cpressMax_MPa < 0.0 || dp.sigmaMax < 0.0 || dp.uMax < 0.0 || dp.mass < 0.0)
+		return 0;
+	if (!computeConvergedFromMetrics(dp))
+		return 0;
+	return 1;
+}
+
+bool backfillValidityAndConvergedColumns(QSqlQuery& query)
+{
+	if (!query.exec(QStringLiteral(
+	        "UPDATE gear_opt_results SET is_valid = 0"
+	        " WHERE status = 'failed'"
+	        " OR cpressMax_MPa < 0 OR sigmaMax_MPa < 0"
+	        " OR uMax_mm < 0 OR mass_kg < 0"))) {
+		logSqlQuery(query, "backfillIsValidFailed");
+	}
+	if (!query.exec(QStringLiteral(
+	        "UPDATE gear_opt_results SET is_valid = 1, converged = 1"
+	        " WHERE status = 'done'"
+	        " AND cpressMax_MPa > 0 AND sigmaMax_MPa > 0"
+	        " AND uMax_mm >= 0 AND mass_kg > 0"
+	        " AND edgeLoadRatio > 0 AND cpressCV > 0"))) {
+		logSqlQuery(query, "backfillIsValidDone");
+	}
+	return true;
+}
+
+int countSamplesForBaseCase(QSqlQuery& query,
+                            const QString& baseCaseH,
+                            double fixedWidthMm)
+{
+	QString sql = QStringLiteral(
+	    "SELECT COUNT(*) FROM gear_opt_results WHERE base_case_hash = ?");
+	if (fixedWidthMm >= 0.0)
+		sql += QStringLiteral(" AND ABS(width - ?) < 1e-6");
+	query.prepare(sql);
+	query.addBindValue(baseCaseH);
+	if (fixedWidthMm >= 0.0)
+		query.addBindValue(fixedWidthMm);
+	if (!query.exec() || !query.next())
+		return 0;
+	return query.value(0).toInt();
 }
 
 } // namespace
@@ -302,9 +366,17 @@ bool GearOptResultDatabase::ensureGearOptResultsTable() const
 	    "verified_by_ccx INTEGER DEFAULT 1",
 	    "base_case_hash TEXT",
 	    "design_hash TEXT",
+	    "converged INTEGER DEFAULT 0",
+	    "solve_time_s REAL",
+	    "retry_count INTEGER DEFAULT 0",
+	    "last_error_message TEXT",
+	    "last_retry_time TEXT",
+	    "is_valid INTEGER DEFAULT 1",
 	};
 	for (const char* col : kExtraColumns)
 		ensureColumn(query, kMainTable, col);
+
+	backfillValidityAndConvergedColumns(query);
 
 	return true;
 }
@@ -418,6 +490,8 @@ bool GearOptResultDatabase::findIdByCaseHash(const QString& hash, int* outId) co
 	query.prepare(QStringLiteral(
 	    "SELECT id FROM gear_opt_results"
 	    " WHERE case_hash = ? AND status = 'done'"
+	    " AND converged = 1 AND is_valid = 1"
+	    " AND cpressMax_MPa > 0"
 	    " AND case_hash IS NOT NULL AND TRIM(case_hash) != ''"
 	    " ORDER BY id DESC LIMIT 1"));
 	query.addBindValue(hash);
@@ -452,6 +526,8 @@ bool GearOptResultDatabase::loadResultByCaseHash(const QString& hash, GearDesign
 	    " isPareto, rank, crowdingDistance"
 	    " FROM gear_opt_results"
 	    " WHERE case_hash = ? AND status = 'done'"
+	    " AND converged = 1 AND is_valid = 1"
+	    " AND cpressMax_MPa > 0"
 	    " AND case_hash IS NOT NULL AND TRIM(case_hash) != ''"
 	    " ORDER BY id DESC LIMIT 1"));
 	query.addBindValue(hash);
@@ -591,7 +667,10 @@ bool GearOptResultDatabase::insertDesignPointResult(const QString& runId,
 	     << QStringLiteral("case_hash")
 	     << QStringLiteral("sample_source") << QStringLiteral("surrogate_used")
 	     << QStringLiteral("verified_by_ccx") << QStringLiteral("base_case_hash")
-	     << QStringLiteral("design_hash");
+	     << QStringLiteral("design_hash") << QStringLiteral("converged")
+	     << QStringLiteral("solve_time_s") << QStringLiteral("retry_count")
+	     << QStringLiteral("last_error_message") << QStringLiteral("last_retry_time")
+	     << QStringLiteral("is_valid");
 
 	const QString tableName = QString::fromLatin1(kMainTable);
 	QStringList placeholderList;
@@ -611,6 +690,9 @@ bool GearOptResultDatabase::insertDesignPointResult(const QString& runId,
 		    << tableName << QStringLiteral("sql=") << sql;
 		return false;
 	}
+
+	const int convergedFlag = computeConvergedFromMetrics(store) ? 1 : 0;
+	const int isValidFlag   = computeIsValidFlag(store);
 
 	int bindCount = 0;
 	const auto bind = [&](const QVariant& v) { query.bindValue(bindCount++, v); };
@@ -689,6 +771,12 @@ bool GearOptResultDatabase::insertDesignPointResult(const QString& runId,
 	bind(1);
 	bind(baseCaseHash(store));
 	bind(designHash(store));
+	bind(convergedFlag);
+	bind(store.solverTime);
+	bind(0);
+	bind(QString());
+	bind(QString());
+	bind(isValidFlag);
 
 	if (bindCount != cols.size()) {
 		qWarning().noquote()
@@ -710,13 +798,15 @@ bool GearOptResultDatabase::insertDesignPointResult(const QString& runId,
 
 	const int rowId = query.lastInsertId().toInt();
 	qDebug().noquote() << QStringLiteral("[GearOpt][DB] insert ok table=%1 gen=%2 individual_id=%3 "
-	                                     "status=%4 row_id=%5 run_id=%6")
+	                                     "status=%4 row_id=%5 run_id=%6 converged=%7 is_valid=%8")
 	                              .arg(tableName)
 	                              .arg(generation)
 	                              .arg(individualId)
 	                              .arg(pointStatusToString(store.status))
 	                              .arg(rowId)
-	                              .arg(runId);
+	                              .arg(runId)
+	                              .arg(convergedFlag)
+	                              .arg(isValidFlag);
 	return true;
 }
 
@@ -767,6 +857,7 @@ bool GearOptResultDatabase::designHashExists(const QString& baseCaseH,
 	    "SELECT 1 FROM gear_opt_results"
 	    " WHERE base_case_hash = ? AND design_hash = ?"
 	    " AND status = 'done' AND verified_by_ccx = 1"
+	    " AND converged = 1 AND is_valid = 1"
 	    " LIMIT 1"));
 	query.addBindValue(baseCaseH);
 	query.addBindValue(designH);
@@ -841,7 +932,8 @@ QSet<QString> GearOptResultDatabase::knownDesignHashesForBaseCase(const QString&
 
 QVector<SurrogateSample> GearOptResultDatabase::loadValidatedSamples(const QString& baseCaseH,
                                                                      double fixedWidthMm,
-                                                                     int maxCount) const
+                                                                     int maxCount,
+                                                                     SurrogateSampleLoadStats* stats) const
 {
 	QVector<SurrogateSample> out;
 	if (!isOpen() || baseCaseH.isEmpty())
@@ -849,13 +941,19 @@ QVector<SurrogateSample> GearOptResultDatabase::loadValidatedSamples(const QStri
 
 	QSqlDatabase db = QSqlDatabase::database(connectionName(), false);
 	QSqlQuery      query(db);
+
+	if (stats) {
+		stats->totalSamples = countSamplesForBaseCase(query, baseCaseH, fixedWidthMm);
+		stats->validSamples = 0;
+		stats->failedSkipped = 0;
+	}
+
 	QString sql = QStringLiteral(
 	    "SELECT x1, x2, ca1, lca1, ca2, lca2, width, hubRatio, design_hash, case_hash,"
 	    " cpressMax_MPa, edgeLoadRatio, cpressCV, sigmaMax_MPa, uMax_mm, mass_kg"
 	    " FROM gear_opt_results"
 	    " WHERE base_case_hash = ?"
-	    " AND") + validatedSurrogateSampleWhereSql()
-	                  + QStringLiteral(" AND mass_kg >= 0");
+	    " AND") + validatedSurrogateSampleWhereSql();
 	if (fixedWidthMm >= 0.0)
 		sql += QStringLiteral(" AND ABS(width - ?) < 1e-6");
 	sql += QStringLiteral(" ORDER BY id ASC");
@@ -892,26 +990,341 @@ QVector<SurrogateSample> GearOptResultDatabase::loadValidatedSamples(const QStri
 			continue;
 		s.x = { x1, x2, reliefCheck.ca1, reliefCheck.lca1, reliefCheck.ca2, reliefCheck.lca2, hubRatio };
 		s.designHash = query.value(col++).toString();
-	s.caseHash   = query.value(col++).toString().trimmed();
-	s.cpressMax  = query.value(col++).toDouble();
-	s.edgeLoadRatio = variantToDouble(query.value(col++), -1.0);
-	s.cpressCV   = variantToDouble(query.value(col++), -1.0);
-	s.sigmaMax   = query.value(col++).toDouble();
+		s.caseHash   = query.value(col++).toString().trimmed();
+		s.cpressMax  = query.value(col++).toDouble();
+		s.edgeLoadRatio = variantToDouble(query.value(col++), -1.0);
+		s.cpressCV   = variantToDouble(query.value(col++), -1.0);
+		s.sigmaMax   = query.value(col++).toDouble();
 		s.uMax       = query.value(col++).toDouble();
 		s.mass       = query.value(col++).toDouble();
-		if (s.x.size() == kSurrogateInputDim
-		    && s.cpressMax > 0.0 && std::isfinite(s.cpressMax)
-		    && s.edgeLoadRatio > 0.0 && std::isfinite(s.edgeLoadRatio)
-		    && s.cpressCV > 0.0 && std::isfinite(s.cpressCV))
+		const bool metricsOk = s.x.size() == kSurrogateInputDim
+		                       && s.cpressMax > 0.0 && std::isfinite(s.cpressMax)
+		                       && s.sigmaMax > 0.0 && std::isfinite(s.sigmaMax)
+		                       && s.uMax >= 0.0 && std::isfinite(s.uMax)
+		                       && s.mass > 0.0 && std::isfinite(s.mass)
+		                       && s.edgeLoadRatio > 0.0 && std::isfinite(s.edgeLoadRatio)
+		                       && s.cpressCV > 0.0 && std::isfinite(s.cpressCV);
+		if (metricsOk)
 			out.append(s);
-		else if (s.cpressMax <= 0.0)
+		else if (s.cpressMax <= 0.0 || !std::isfinite(s.cpressMax))
 			qDebug().noquote() << QStringLiteral("[GearOpt][DB] Skip sample because cpressMax_MPa is missing.");
+		else if (s.sigmaMax <= 0.0 || !std::isfinite(s.sigmaMax))
+			qDebug().noquote() << QStringLiteral("[GearOpt][DB] Skip sample because sigmaMax_MPa is missing.");
+		else if (s.uMax < 0.0 || !std::isfinite(s.uMax))
+			qDebug().noquote() << QStringLiteral("[GearOpt][DB] Skip sample because uMax_mm is missing.");
+		else if (s.mass <= 0.0 || !std::isfinite(s.mass))
+			qDebug().noquote() << QStringLiteral("[GearOpt][DB] Skip sample because mass_kg is missing.");
 		else if (s.edgeLoadRatio <= 0.0)
 			qDebug().noquote() << QStringLiteral("[GearOpt][DB] Skip sample because edgeLoadRatio is missing.");
 		else if (s.cpressCV <= 0.0)
 			qDebug().noquote() << QStringLiteral("[GearOpt][DB] Skip sample because cpressCV is missing.");
 	}
+
+	if (stats) {
+		stats->validSamples  = out.size();
+		stats->failedSkipped = std::max(0, stats->totalSamples - stats->validSamples);
+		qDebug().noquote() << QStringLiteral("[GearOpt][DB] loadValidatedSamples path=%1 total=%2 valid=%3 failed_skipped=%4")
+		                      .arg(_dbPath)
+		                      .arg(stats->totalSamples)
+		                      .arg(stats->validSamples)
+		                      .arg(stats->failedSkipped);
+	}
 	return out;
+}
+
+QSet<QString> GearOptResultDatabase::failedCaseHashesForBaseCase(const QString& baseCaseH,
+                                                                 double fixedWidthMm) const
+{
+	QSet<QString> out;
+	if (!isOpen() || baseCaseH.isEmpty())
+		return out;
+
+	QSqlDatabase db = QSqlDatabase::database(connectionName(), false);
+	QSqlQuery      query(db);
+	QString sql = QStringLiteral(
+	    "SELECT DISTINCT case_hash FROM gear_opt_results"
+	    " WHERE base_case_hash = ?"
+	    " AND case_hash IS NOT NULL AND TRIM(case_hash) != ''"
+	    " AND (status = 'failed' OR cpressMax_MPa < 0 OR is_valid = 0)");
+	if (fixedWidthMm >= 0.0)
+		sql += QStringLiteral(" AND ABS(width - ?) < 1e-6");
+	query.prepare(sql);
+	query.addBindValue(baseCaseH);
+	if (fixedWidthMm >= 0.0)
+		query.addBindValue(fixedWidthMm);
+	if (!query.exec()) {
+		logSqlQuery(query, "failedCaseHashesForBaseCase");
+		return out;
+	}
+	while (query.next()) {
+		const QString h = query.value(0).toString().trimmed();
+		if (!h.isEmpty())
+			out.insert(h);
+	}
+	return out;
+}
+
+QVector<int> GearOptResultDatabase::findRowIdsByCaseHash(const QString& caseHash) const
+{
+	QVector<int> out;
+	if (!isOpen() || caseHash.isEmpty())
+		return out;
+
+	QSqlDatabase db = QSqlDatabase::database(connectionName(), false);
+	QSqlQuery      query(db);
+	query.prepare(QStringLiteral(
+	    "SELECT id FROM gear_opt_results"
+	    " WHERE case_hash = ? AND case_hash IS NOT NULL AND TRIM(case_hash) != ''"
+	    " ORDER BY id ASC"));
+	query.addBindValue(caseHash);
+	if (!query.exec()) {
+		logSqlQuery(query, "findRowIdsByCaseHash");
+		return out;
+	}
+	while (query.next())
+		out.append(query.value(0).toInt());
+	return out;
+}
+
+QVector<FailedCaseRecord> GearOptResultDatabase::loadFailedCasesForRetry(const QString& baseCaseH,
+                                                                         double fixedWidthMm) const
+{
+	QVector<FailedCaseRecord> out;
+	if (!isOpen())
+		return out;
+
+	QSqlDatabase db = QSqlDatabase::database(connectionName(), false);
+	QSqlQuery      query(db);
+	QString sql = QStringLiteral(
+	    "SELECT id, case_hash, run_id, gen, individual_id, created_at,"
+	    " z1, z2, module, alpha, x1, x2, ca1, lca1, ca2, lca2, width, hubRatio,"
+	    " addendumCoeff, dedendumCoeff, rootFilletCoeff,"
+	    " meshSize_mm, meshAuto, meshMethod, elementOrder,"
+	    " materialName, youngModulus_MPa, poissonRatio, density,"
+	    " torque_Nm, enableContact, contactType, contactStiffness, frictionCoeff,"
+	    " solverName, solverPath, staticStep, runDir, retry_count, errorMsg"
+	    " FROM gear_opt_results"
+	    " WHERE (status = 'failed' OR cpressMax_MPa < 0 OR sigmaMax_MPa < 0)"
+	    " AND case_hash IS NOT NULL AND TRIM(case_hash) != ''");
+	if (!baseCaseH.isEmpty())
+		sql += QStringLiteral(" AND base_case_hash = ?");
+	if (fixedWidthMm >= 0.0)
+		sql += QStringLiteral(" AND ABS(width - ?) < 1e-6");
+	sql += QStringLiteral(" ORDER BY id ASC");
+
+	query.prepare(sql);
+	if (!baseCaseH.isEmpty())
+		query.addBindValue(baseCaseH);
+	if (fixedWidthMm >= 0.0)
+		query.addBindValue(fixedWidthMm);
+	if (!query.exec()) {
+		logSqlQuery(query, "loadFailedCasesForRetry");
+		return out;
+	}
+
+	QHash<QString, int> indexByHash;
+	while (query.next()) {
+		int col = 0;
+		const int rowId = query.value(col++).toInt();
+		const QString caseH = query.value(col++).toString().trimmed();
+		if (caseH.isEmpty())
+			continue;
+
+		const QString runId = query.value(col++).toString();
+		const int gen = query.value(col++).toInt();
+		const int individualId = query.value(col++).toInt();
+		const QString created = query.value(col++).toString();
+		const int z1 = query.value(col++).toInt();
+		const int z2 = query.value(col++).toInt();
+		const double module = query.value(col++).toDouble();
+		const double alpha = query.value(col++).toDouble();
+		const double x1 = query.value(col++).toDouble();
+		const double x2 = query.value(col++).toDouble();
+		const double ca1 = query.value(col++).toDouble();
+		const double lca1 = query.value(col++).toDouble();
+		const double ca2 = query.value(col++).toDouble();
+		const double lca2 = query.value(col++).toDouble();
+		const double width = query.value(col++).toDouble();
+		const double hubRatio = query.value(col++).toDouble();
+		const double addendumCoeff = query.value(col++).toDouble();
+		const double dedendumCoeff = query.value(col++).toDouble();
+		const double rootFilletCoeff = query.value(col++).toDouble();
+		const double meshSize_mm = query.value(col++).toDouble();
+		const bool meshAuto = query.value(col++).toInt() != 0;
+		const QString meshMethod = query.value(col++).toString();
+		const int elementOrder = query.value(col++).toInt();
+		const QString materialName = query.value(col++).toString();
+		const double youngModulus = query.value(col++).toDouble();
+		const double poissonRatio = query.value(col++).toDouble();
+		const double density = query.value(col++).toDouble();
+		const double torque_Nm = query.value(col++).toDouble();
+		const bool enableContact = query.value(col++).toInt() != 0;
+		const QString contactType = query.value(col++).toString();
+		const double contactStiffness = query.value(col++).toDouble();
+		const double frictionCoeff = query.value(col++).toDouble();
+		const QString solverName = query.value(col++).toString();
+		const QString solverPath = query.value(col++).toString();
+		const QString staticStep = query.value(col++).toString();
+		const QString runDir = query.value(col++).toString();
+		const int retryCount = query.value(col++).toInt();
+		const QString errMsg = query.value(col++).toString();
+
+		FailedCaseDbRow row;
+		row.rowId        = rowId;
+		row.databasePath = _dbPath;
+		row.retryCount   = retryCount;
+
+		if (!indexByHash.contains(caseH)) {
+			FailedCaseRecord fresh;
+			fresh.caseHash = caseH;
+			GearDesignPoint& dp = fresh.dp;
+			dp.runId       = runId;
+			dp.generation  = gen;
+			dp.id          = individualId;
+			dp.createdAt   = QDateTime::fromString(created, Qt::ISODate);
+			dp.z1          = z1;
+			dp.z2          = z2;
+			dp.module      = module;
+			dp.alpha       = alpha;
+			dp.x1          = x1;
+			dp.x2          = x2;
+			dp.ca1         = ca1;
+			dp.lca1        = lca1;
+			dp.ca2         = ca2;
+			dp.lca2        = lca2;
+			dp.commonWidth = width;
+			dp.hubRatio    = hubRatio;
+			dp.addendumCoeff   = addendumCoeff;
+			dp.dedendumCoeff   = dedendumCoeff;
+			dp.rootFilletCoeff = rootFilletCoeff;
+			dp.meshSize_mm     = meshSize_mm;
+			dp.meshAuto        = meshAuto;
+			dp.meshMethod      = meshMethod;
+			dp.elementOrder    = elementOrder;
+			dp.materialName    = materialName;
+			dp.youngModulus_MPa = youngModulus;
+			dp.poissonRatio    = poissonRatio;
+			dp.density         = density;
+			dp.torque_Nm       = torque_Nm;
+			dp.enableContact   = enableContact;
+			dp.contactType     = contactType;
+			dp.contactStiffness = contactStiffness;
+			dp.frictionCoeff   = frictionCoeff;
+			dp.solver          = solverName;
+			dp.solverPath      = solverPath;
+			dp.staticStep      = staticStep;
+			dp.runDir          = runDir;
+			dp.errorMsg        = errMsg;
+			dp.status          = PointStatus::Failed;
+			out.append(fresh);
+			indexByHash.insert(caseH, out.size() - 1);
+		}
+
+		out[indexByHash.value(caseH)].dbRows.append(row);
+	}
+	return out;
+}
+
+bool GearOptResultDatabase::updateDesignPointResultByRowId(int rowId, const GearDesignPoint& dp)
+{
+	if (!isOpen() || rowId <= 0)
+		return false;
+
+	GearDesignPoint store = dp;
+	store.syncLegacyResultFields();
+	const int convergedFlag = computeConvergedFromMetrics(store) ? 1 : 0;
+	const int isValidFlag   = computeIsValidFlag(store);
+
+	QSqlDatabase db = QSqlDatabase::database(connectionName(), false);
+	QSqlQuery      query(db);
+	query.prepare(QStringLiteral(
+	    "UPDATE gear_opt_results SET"
+	    " sigmaMax_MPa=?, sigmaMax_gear1_MPa=?, sigmaMax_gear2_MPa=?,"
+	    " uMax_mm=?, uMax_gear1_mm=?, uMax_gear2_mm=?,"
+	    " mass_kg=?, mass_gear1_kg=?, mass_gear2_kg=?,"
+	    " cpressMax_MPa=?, cpressMean_MPa=?, cpressStd_MPa=?, cpressCV=?,"
+	    " contactWidth_mm=?, edgeLoadRatio=?, cpressEdgeMean_MPa=?, cpressCenterMean_MPa=?,"
+	    " cpressActiveNodes=?, cpressBinCount=?,"
+	    " nodeCount=?, elementCount=?,"
+	    " status=?, errorMsg=?, runDir=?, meshInpPath=?, jobInpPath=?, datPath=?, frdPath=?,"
+	    " converged=?, solve_time_s=?, is_valid=?, last_error_message=?, last_retry_time=?"
+	    " WHERE id=?"));
+
+	int b = 0;
+	query.bindValue(b++, store.sigmaMax);
+	query.bindValue(b++, store.sigmaMax_gear1);
+	query.bindValue(b++, store.sigmaMax_gear2);
+	query.bindValue(b++, store.uMax);
+	query.bindValue(b++, store.uMax_gear1);
+	query.bindValue(b++, store.uMax_gear2);
+	query.bindValue(b++, store.mass);
+	query.bindValue(b++, store.mass_gear1);
+	query.bindValue(b++, store.mass_gear2);
+	query.bindValue(b++, store.cpressMax_MPa);
+	query.bindValue(b++, store.cpressMean_MPa);
+	query.bindValue(b++, store.cpressStd_MPa);
+	query.bindValue(b++, store.cpressCV);
+	query.bindValue(b++, store.contactWidth_mm);
+	query.bindValue(b++, store.edgeLoadRatio);
+	query.bindValue(b++, store.cpressEdgeMean_MPa);
+	query.bindValue(b++, store.cpressCenterMean_MPa);
+	query.bindValue(b++, store.cpressActiveNodes);
+	query.bindValue(b++, store.cpressBinCount);
+	query.bindValue(b++, store.nodeCount);
+	query.bindValue(b++, store.elementCount);
+	query.bindValue(b++, pointStatusToString(store.status));
+	query.bindValue(b++, QString());
+	query.bindValue(b++, store.runDir);
+	query.bindValue(b++, store.meshInpPath);
+	query.bindValue(b++, store.jobInpPath);
+	query.bindValue(b++, store.datPath);
+	query.bindValue(b++, store.frdPath);
+	query.bindValue(b++, convergedFlag);
+	query.bindValue(b++, store.solverTime);
+	query.bindValue(b++, isValidFlag);
+	query.bindValue(b++, QString());
+	query.bindValue(b++, QDateTime::currentDateTime().toString(Qt::ISODate));
+	query.bindValue(b++, rowId);
+
+	if (!query.exec()) {
+		logSqlQuery(query, "updateDesignPointResultByRowId");
+		return false;
+	}
+	qDebug().noquote() << QStringLiteral("[GearOpt][DB] update ok row_id=%1 case_hash=%2 status=%3 converged=%4 is_valid=%5")
+	                      .arg(rowId)
+	                      .arg(caseHash(store))
+	                      .arg(pointStatusToString(store.status))
+	                      .arg(convergedFlag)
+	                      .arg(isValidFlag);
+	return true;
+}
+
+bool GearOptResultDatabase::recordRetryFailureByRowId(int rowId, const QString& errorMsg)
+{
+	if (!isOpen() || rowId <= 0)
+		return false;
+
+	const QString now = QDateTime::currentDateTime().toString(Qt::ISODate);
+	QSqlDatabase db = QSqlDatabase::database(connectionName(), false);
+	QSqlQuery      query(db);
+	query.prepare(QStringLiteral(
+	    "UPDATE gear_opt_results SET"
+	    " status='failed', converged=0, is_valid=0,"
+	    " retry_count=COALESCE(retry_count, 0) + 1,"
+	    " last_error_message=?, last_retry_time=?, errorMsg=?"
+	    " WHERE id=?"));
+	query.addBindValue(errorMsg.left(2000));
+	query.addBindValue(now);
+	query.addBindValue(errorMsg.left(2000));
+	query.addBindValue(rowId);
+	if (!query.exec()) {
+		logSqlQuery(query, "recordRetryFailureByRowId");
+		return false;
+	}
+	qDebug().noquote() << QStringLiteral("[GearOpt][DB] retry failed row_id=%1 error=%2")
+	                      .arg(rowId)
+	                      .arg(errorMsg.left(120));
+	return true;
 }
 
 int GearOptResultDatabase::countValidResults() const
@@ -923,7 +1336,8 @@ int GearOptResultDatabase::countValidResults() const
 	QSqlQuery      query(db);
 	if (!query.exec(QStringLiteral(
 	        "SELECT COUNT(*) FROM gear_opt_results"
-	        " WHERE status = 'done' AND sigmaMax_MPa > 0"))) {
+	        " WHERE status = 'done' AND is_valid = 1 AND converged = 1"
+	        " AND cpressMax_MPa > 0 AND sigmaMax_MPa > 0"))) {
 		logSqlQuery(query, "countValidResults");
 		qWarning().noquote() << QStringLiteral("[GearOpt][DB] countValidResults failed");
 		return 0;

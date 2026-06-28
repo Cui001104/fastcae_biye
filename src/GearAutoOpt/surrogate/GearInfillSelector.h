@@ -47,6 +47,7 @@ public:
 	                                           bool runMeshAuto,
 	                                           const QSet<QString>& existingCaseHashes,
 	                                           const QSet<QString>& existingDesignHashes,
+	                                           const QSet<QString>& failedCaseHashes,
 	                                           int k);
 
 	/// infill 日志：7 维代理设计变量。

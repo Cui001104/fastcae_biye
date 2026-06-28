@@ -171,6 +171,7 @@ Population selectImpl(const Population& surrogatePareto,
                       bool runMeshAuto,
                       const QSet<QString>& existingCaseHashes,
                       const QSet<QString>& existingDesignHashes,
+                      const QSet<QString>& failedCaseHashes,
                       const QVector<double>& sampleResiduals,
                       const InfillScoringConfig& scoring,
                       int k)
@@ -221,6 +222,11 @@ Population selectImpl(const Population& surrogatePareto,
 
 		if (cfg && basePoint) {
 			const QString caseH = GearOptResultDatabase::caseHash(dp);
+			if (failedCaseHashes.contains(caseH)) {
+				qDebug().noquote()
+				    << QStringLiteral("[Infill] skip failed case_hash=%1").arg(caseH);
+				continue;
+			}
 			if (knownCaseHashes.contains(caseH)) {
 				qDebug().noquote()
 				    << QStringLiteral("[Infill] skip existing cache: %1 | %2")
@@ -328,6 +334,11 @@ Population selectImpl(const Population& surrogatePareto,
 		if (cfg && basePoint) {
 			const GearDesignPoint dp = candDp;
 			const QString caseH = GearOptResultDatabase::caseHash(dp);
+			if (failedCaseHashes.contains(caseH)) {
+				qDebug().noquote()
+				    << QStringLiteral("[Infill] skip failed case_hash=%1").arg(caseH);
+				continue;
+			}
 			if (selectedCaseHashes.contains(caseH)) {
 				qDebug().noquote()
 				    << QStringLiteral("[Infill] skip duplicate in this round: %1 | %2")
@@ -387,7 +398,7 @@ Population GearInfillSelector::selectSparseParetoPoints(const Population& surrog
 		}
 	}
 	return selectImpl(surrogatePareto, existingSamples, lo, hi,
-	                  nullptr, nullptr, 0.0, false, {}, {}, {}, distanceOnlyScoring(), k);
+	                  nullptr, nullptr, 0.0, false, {}, {}, {}, {}, distanceOnlyScoring(), k);
 }
 
 Population GearInfillSelector::selectSparseParetoPoints(const Population& surrogatePareto,
@@ -402,7 +413,7 @@ Population GearInfillSelector::selectSparseParetoPoints(const Population& surrog
 	return selectImpl(surrogatePareto, existingSamples,
 	                  inputBoundsLower(cfg), inputBoundsUpper(cfg),
 	                  &cfg, &basePoint, fixedMeshSizeMm, runMeshAuto,
-	                  existingCaseHashes, {}, {}, distanceOnlyScoring(), k);
+	                  existingCaseHashes, {}, {}, {}, distanceOnlyScoring(), k);
 }
 
 Population GearInfillSelector::selectSparseParetoPoints(const Population& surrogatePareto,
@@ -415,12 +426,14 @@ Population GearInfillSelector::selectSparseParetoPoints(const Population& surrog
                                                         bool runMeshAuto,
                                                         const QSet<QString>& existingCaseHashes,
                                                         const QSet<QString>& existingDesignHashes,
+                                                        const QSet<QString>& failedCaseHashes,
                                                         int k)
 {
 	return selectImpl(surrogatePareto, existingSamples,
 	                  inputBoundsLower(cfg), inputBoundsUpper(cfg),
 	                  &cfg, &basePoint, fixedMeshSizeMm, runMeshAuto,
-	                  existingCaseHashes, existingDesignHashes, sampleResiduals, scoring, k);
+	                  existingCaseHashes, existingDesignHashes, failedCaseHashes,
+	                  sampleResiduals, scoring, k);
 }
 
 QString GearInfillSelector::formatDesignVarsForLog(const GearDesignPoint& dp)

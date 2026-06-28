@@ -7,6 +7,7 @@
 #include "GearAutoOpt/solver/CCXResultParser.h"
 #include "GearAutoOpt/surrogate/GearSurrogateModel.h"
 
+#include <QMetaType>
 #include <QSet>
 #include <QString>
 #include <QVector>
@@ -20,6 +21,33 @@ struct CpressDistributionBackfillStats {
 	int updatedCount{0};
 	int skipMissingFrd{0};
 	int failedParseCount{0};
+};
+
+/// RBF 训练样本加载统计（total / valid / skipped）。
+struct SurrogateSampleLoadStats {
+	int totalSamples{0};
+	int validSamples{0};
+	int failedSkipped{0};
+};
+
+struct FailedCaseDbRow {
+	int     rowId{-1};
+	QString databasePath;
+	int     retryCount{0};
+};
+
+/// 待重算的 failed 样本（按 case_hash 去重后的一条记录）。
+struct FailedCaseRecord {
+	QString                  caseHash;
+	GearDesignPoint          dp;
+	QVector<FailedCaseDbRow> dbRows;
+};
+
+struct FailedCaseRetryStats {
+	int totalFailed{0};
+	int retried{0};
+	int fixed{0};
+	int stillFailed{0};
 };
 
 /// SQLite 持久化：gear_opt_results 主表。
@@ -66,9 +94,27 @@ public:
 
 	/// 加载可用于 RBF 训练的样本；maxCount<=0 表示不限制条数。
 	/// fixedWidthMm>=0 时仅加载 ABS(width-fixedWidth)<1e-6 的样本。
+	/// stats 非空时填充 total / valid / failedSkipped 计数并写 debug 日志。
 	QVector<SurrogateSample> loadValidatedSamples(const QString& baseCaseHash,
 	                                              double fixedWidthMm = -1.0,
-	                                              int maxCount = 0) const;
+	                                              int maxCount = 0,
+	                                              SurrogateSampleLoadStats* stats = nullptr) const;
+
+	/// status='failed' 或 cpressMax_MPa<0 或 is_valid=0 的 case_hash（infill 黑名单）。
+	QSet<QString> failedCaseHashesForBaseCase(const QString& baseCaseHash,
+	                                          double fixedWidthMm = -1.0) const;
+
+	/// 从当前库查询可重算的 failed 样本行（不含去重）。
+	QVector<FailedCaseRecord> loadFailedCasesForRetry(const QString& baseCaseHash = QString(),
+	                                                  double fixedWidthMm = -1.0) const;
+
+	/// 成功重算后 UPDATE 原记录（不 INSERT）。
+	bool updateDesignPointResultByRowId(int rowId, const GearDesignPoint& dp);
+
+	/// 重算仍失败：保留 failed，递增 retry_count 并记录 last_error_message。
+	bool recordRetryFailureByRowId(int rowId, const QString& errorMsg);
+
+	QVector<int> findRowIdsByCaseHash(const QString& caseHash) const;
 
 	/// 同一 baseCase 下已有 CCX 结果的 case_hash 集合（infill 去重 / 排除 cache 用）。
 	QSet<QString> knownCaseHashesForBaseCase(const QString& baseCaseHash,
@@ -143,5 +189,7 @@ private:
 };
 
 } // namespace GearAutoOpt
+
+Q_DECLARE_METATYPE(GearAutoOpt::FailedCaseRetryStats)
 
 #endif

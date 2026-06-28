@@ -47,41 +47,81 @@ void GearAutoCaseRunner::emitLog(const QString& msg) {
 	emitLogDebug(msg);
 }
 
-void GearAutoCaseRunner::runOne(GearDesignPoint& dp) {	transition(CaseRunnerState::Idle);
-	dp.status = PointStatus::Running; //当前设计点正在运行
-	dp.errorMsg.clear(); //清空错误信息
+namespace {
 
-	//定义一个结构体，用于存储每个步骤的名称和对应的函数指针
-	struct Step {
-		CaseRunnerState target;
-		bool (GearAutoCaseRunner::*fn)(GearDesignPoint&);
-	};
-	const Step steps[] = { //定义一个数组，用于存储每个步骤的名称和对应的函数指针
-		{ CaseRunnerState::Geom,     &GearAutoCaseRunner::runGeometryStep },
-		{ CaseRunnerState::Mesh,     &GearAutoCaseRunner::runMeshStep     },
-		{ CaseRunnerState::InpWrite, &GearAutoCaseRunner::runInpWriteStep },
-		{ CaseRunnerState::Solve,    &GearAutoCaseRunner::runSolveStep    },
-		{ CaseRunnerState::Parse,    &GearAutoCaseRunner::runParseStep    },
-	};
+struct CaseRunnerStep {
+	CaseRunnerState target;
+	bool (GearAutoCaseRunner::*fn)(GearDesignPoint&);
+};
 
-	for (const auto& step : steps) { //遍历每个步骤
+} // namespace
+
+bool GearAutoCaseRunner::runPreCcxSteps(GearDesignPoint& dp)
+{
+	transition(CaseRunnerState::Idle);
+	dp.status     = PointStatus::Running;
+	dp.errorMsg.clear();
+
+	static const CaseRunnerStep kPreSteps[] = {
+	    { CaseRunnerState::Geom,     &GearAutoCaseRunner::runGeometryStep },
+	    { CaseRunnerState::Mesh,     &GearAutoCaseRunner::runMeshStep     },
+	    { CaseRunnerState::InpWrite, &GearAutoCaseRunner::runInpWriteStep },
+	};
+	for (const auto& step : kPreSteps) {
 		transition(step.target);
-		emitLogDebug(QString::fromUtf8("→ ") + caseRunnerStateToString(step.target));		const bool ok = (this->*step.fn)(dp); //调用对应的函数
-		if (!ok) {
-			if (dp.errorMsg.isEmpty()) {
-				dp.errorMsg = QString("step '%1' failed")
-				              .arg(caseRunnerStateToString(step.target));
-			}
-			dp.status = PointStatus::Failed; //当前设计点运行失败	
-			transition(CaseRunnerState::Failed); //切换到失败状态
+		emitLogDebug(QString::fromUtf8("→ ") + caseRunnerStateToString(step.target));
+		if (!(this->*step.fn)(dp)) {
+			if (dp.errorMsg.isEmpty())
+				dp.errorMsg = QString("step '%1' failed").arg(caseRunnerStateToString(step.target));
+			dp.status = PointStatus::Failed;
+			transition(CaseRunnerState::Failed);
 			emitLogNormal(QStringLiteral("FAIL ") + caseRunnerStateToString(step.target)
-			        + QStringLiteral(": ") + dp.errorMsg);			emit finished(false); //发出运行结束信号
-			return;
+			              + QStringLiteral(": ") + dp.errorMsg);
+			return false;
 		}
 	}
-	dp.status = PointStatus::Done; //当前设计点运行成功
+	return true;
+}
+
+bool GearAutoCaseRunner::runCcxOnlySteps(GearDesignPoint& dp)
+{
+	static const CaseRunnerStep kCcxSteps[] = {
+	    { CaseRunnerState::Solve, &GearAutoCaseRunner::runSolveStep },
+	    { CaseRunnerState::Parse, &GearAutoCaseRunner::runParseStep },
+	};
+	for (const auto& step : kCcxSteps) {
+		transition(step.target);
+		emitLogDebug(QString::fromUtf8("→ ") + caseRunnerStateToString(step.target));
+		if (!(this->*step.fn)(dp)) {
+			if (dp.errorMsg.isEmpty())
+				dp.errorMsg = QString("step '%1' failed").arg(caseRunnerStateToString(step.target));
+			dp.status = PointStatus::Failed;
+			transition(CaseRunnerState::Failed);
+			emitLogNormal(QStringLiteral("FAIL ") + caseRunnerStateToString(step.target)
+			              + QStringLiteral(": ") + dp.errorMsg);
+			return false;
+		}
+	}
+	return true;
+}
+
+void GearAutoCaseRunner::runOne(GearDesignPoint& dp)
+{
+	transition(CaseRunnerState::Idle);
+	dp.status     = PointStatus::Running;
+	dp.errorMsg.clear();
+
+	if (!runPreCcxSteps(dp)) {
+		emit finished(false);
+		return;
+	}
+	if (!runCcxOnlySteps(dp)) {
+		emit finished(false);
+		return;
+	}
+	dp.status = PointStatus::Done;
 	transition(CaseRunnerState::Done);
-	emit finished(true); //发出运行结束信号
+	emit finished(true);
 }
 
 // 默认 stub（在子类或直接 override 中填实）

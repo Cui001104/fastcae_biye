@@ -53,6 +53,11 @@ public:
 	/// 跑完会 emit `finished(success)`，期间 emit 多次 `stateChanged`。
 	virtual void runOne(GearDesignPoint& dp);
 
+	/// 建模 + 网格 + 写 INP（必须在主线程串行执行）。
+	virtual bool runPreCcxSteps(GearDesignPoint& dp);
+	/// CCX 求解 + 结果解析（可并行，仅依赖 workDir 内 mesh.inp / job.inp）。
+	virtual bool runCcxOnlySteps(GearDesignPoint& dp);
+
 signals:
 	/// 进入新状态（包括 Done/Failed 终态）
 	void stateChanged(GearAutoOpt::CaseRunnerState s);

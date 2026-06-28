@@ -1,6 +1,7 @@
 ﻿// UTF-8 BOM
 #include "GearAutoOptManager.h"
 #include "GearOptCaseRunner.h"
+#include "GearOptMainThreadRunner.h"
 
 #include "GearAutoOpt/data/GearLogLevel.h"
 #include "GearAutoOpt/data/GearOptGeometryBridge.h"
@@ -29,6 +30,14 @@ GearAutoOptManager::GearAutoOptManager(QObject* parent)
 
 GearAutoOptManager::~GearAutoOptManager() = default;
 
+static void connectMainThreadRunnerLogs(GearAutoOptManager* mgr)
+{
+	if (GearOptMainThreadRunner* mt = GearOptMainThreadRunner::instance()) {
+		QObject::connect(mt, &GearOptMainThreadRunner::logMessage, mgr, &GearAutoOptManager::log,
+		                 Qt::QueuedConnection);
+	}
+}
+
 GearDesignPoint GearAutoOptManager::configuredBasePoint() const
 {
     GearDesignPoint dp = _cfg.useOptimizationBase ? _cfg.optimizationBase : GearDesignPoint();
@@ -38,13 +47,18 @@ GearDesignPoint GearAutoOptManager::configuredBasePoint() const
 
 static bool isValidSurrogateTrainingSample(const SurrogateSample& s, const GearOptConfig& cfg)
 {
+    Q_UNUSED(cfg);
     if (s.cpressMax <= 0.0 || !std::isfinite(s.cpressMax))
+        return false;
+    if (s.sigmaMax <= 0.0 || !std::isfinite(s.sigmaMax))
+        return false;
+    if (s.uMax < 0.0 || !std::isfinite(s.uMax))
+        return false;
+    if (s.mass <= 0.0 || !std::isfinite(s.mass))
         return false;
     if (s.edgeLoadRatio <= 0.0 || !std::isfinite(s.edgeLoadRatio))
         return false;
     if (s.cpressCV <= 0.0 || !std::isfinite(s.cpressCV))
-        return false;
-    if (cfg.objectives.minSigmaMax && (s.sigmaMax <= 0.0 || !std::isfinite(s.sigmaMax)))
         return false;
     return true;
 }
@@ -66,13 +80,16 @@ static std::pair<double, double> paretoObjectiveMax(const Population& pareto)
 
 static QVector<SurrogateSample> loadMergedValidatedSamples(const QString& baseCaseH,
                                                            double fixedWidthMm,
-                                                           const GearOptConfig& cfg)
+                                                           const GearOptConfig& cfg,
+                                                           SurrogateSampleLoadStats* mergedStats = nullptr)
 {
     QHash<QString, SurrogateSample> uniq;
-    auto ingestDb = [&](GearOptResultDatabase& db) {
+    SurrogateSampleLoadStats globalStats;
+    SurrogateSampleLoadStats runStats;
+    auto ingestDb = [&](GearOptResultDatabase& db, SurrogateSampleLoadStats* dbStats) {
         if (!db.isOpen())
             return;
-        for (const SurrogateSample& s : db.loadValidatedSamples(baseCaseH, fixedWidthMm)) {
+        for (const SurrogateSample& s : db.loadValidatedSamples(baseCaseH, fixedWidthMm, 0, dbStats)) {
             if (!isValidSurrogateTrainingSample(s, cfg))
                 continue;
             const QString key = s.designHash.isEmpty()
@@ -81,8 +98,13 @@ static QVector<SurrogateSample> loadMergedValidatedSamples(const QString& baseCa
             uniq.insert(key, s);
         }
     };
-    ingestDb(GearOptResultDatabase::global());
-    ingestDb(GearOptResultDatabase::runSession());
+    ingestDb(GearOptResultDatabase::global(), &globalStats);
+    ingestDb(GearOptResultDatabase::runSession(), &runStats);
+    if (mergedStats) {
+        mergedStats->totalSamples  = globalStats.totalSamples + runStats.totalSamples;
+        mergedStats->validSamples  = uniq.size();
+        mergedStats->failedSkipped = std::max(0, mergedStats->totalSamples - mergedStats->validSamples);
+    }
     return uniq.values().toVector();
 }
 
@@ -396,8 +418,7 @@ void GearAutoOptManager::evaluatePopulationByCcx(
             continue;
         }
 
-        const QString workDir = QString("%1/%2_%3")
-            .arg(_runDir).arg(generation).arg(i);
+        const QString workDir = gearOptCaseWorkDir(_runDir, generation, i);
         QDir().mkpath(workDir);
         dp.runDir = workDir;
 
@@ -441,33 +462,47 @@ void GearAutoOptManager::evaluatePopulationByCcx(
         if (!skippedByCache) {
             if (summary)
                 summary->newCcxCount++;
-            GearOptCaseRunner runner;
-            runner.setConfig(_cfg);
-            runner.setWorkDir(workDir);
-            GearMeshParams meshParams;
-            meshParams.globalSize = _fixedMeshSizeMm;
-            meshParams.rootSize   = _fixedRootMeshSizeMm;
-            meshParams.zLayers    = _fixedZLayers;
-            runner.setMeshParams(meshParams);
-            runner.setLogLevel(_cfg.solver.debugMode ? GearLogLevel::Debug : GearLogLevel::Normal);
-            runner.setThreads(_cfg.solver.threads);
-            connect(&runner, &GearOptCaseRunner::log,
-                    [this](const QString& msg) { emit log(msg); });
-                //跑自动化流程
-            runner.runOne(dp);
+            GearOptCasePrepRequest prepReq;
+            prepReq.dp         = dp;
+            prepReq.workDir    = workDir;
+            prepReq.cfg        = _cfg;
+            prepReq.meshParams = {_fixedMeshSizeMm, _fixedRootMeshSizeMm, _fixedZLayers};
+            prepReq.logLevel   = _cfg.solver.debugMode ? GearLogLevel::Debug : GearLogLevel::Normal;
+            prepReq.threads    = _cfg.solver.threads;
+            if (GearOptMainThreadRunner::runPreCcxBlocking(&prepReq)) {
+                dp = prepReq.dp;
+                GearOptCaseRunner ccxRunner;
+                ccxRunner.setConfig(_cfg);
+                ccxRunner.setWorkDir(workDir);
+                ccxRunner.setMeshParams(prepReq.meshParams);
+                ccxRunner.setLogLevel(prepReq.logLevel);
+                ccxRunner.setThreads(_cfg.solver.threads);
+                connect(&ccxRunner, &GearOptCaseRunner::log,
+                        [this](const QString& msg) { emit log(msg); });
+                if (ccxRunner.runCcxOnlySteps(dp))
+                    dp.status = PointStatus::Done;
+            } else {
+                dp = prepReq.dp;
+            }
         } else if (summary) {
             summary->reusedCacheCount++;
         }
 
         dp.fillResultArtifactPaths();
-        auto insertToDb = [&](GearOptResultDatabase& db) {
+        auto insertToDb = [&](GearOptResultDatabase& db, const char* label) {
             if (!db.isOpen())
                 return;
-            db.insertDesignPointResult(_runId, dp, generation, i, ind.rank, ind.crowdingDist,
+            const bool ok = db.insertDesignPointResult(_runId, dp, generation, i, ind.rank, ind.crowdingDist,
                                        dp.isPareto, caseH);
+            emit log(QStringLiteral("[GearOpt][Case] case_id=%1 case_hash=%2 workDir=%3 dbUpdateStatus=%4 db=%5")
+                         .arg(i)
+                         .arg(caseH)
+                         .arg(workDir)
+                         .arg(ok ? QStringLiteral("insert_ok") : QStringLiteral("insert_failed"))
+                         .arg(QString::fromLatin1(label)));
         };
-        insertToDb(GearOptResultDatabase::global());
-        insertToDb(GearOptResultDatabase::runSession());
+        insertToDb(GearOptResultDatabase::global(), "global");
+        insertToDb(GearOptResultDatabase::runSession(), "run");
         if (dp.status == PointStatus::Done && dp.cpressActiveNodes > 0 && QFileInfo::exists(dp.frdPath)) {
             const CpressDistributionMetrics metrics =
                 parseCpressDistributionMetrics(dp.frdPath, dp.cpressBinCount > 0 ? dp.cpressBinCount : (_fixedZLayers > 0 ? _fixedZLayers : 11));
@@ -633,10 +668,7 @@ void GearAutoOptManager::evaluateInfillByCcxParallel(
         GearDesignPoint dp = ind.toDesignPoint(i, generation);
         checkGearOptDesignPointBounds(dp, _cfg);
 
-        const QString workDir = QStringLiteral("%1/gen%2_id%3")
-                                    .arg(_runDir)
-                                    .arg(generation)
-                                    .arg(i);
+        const QString workDir = gearOptCaseWorkDir(_runDir, generation, i);
 
         QString reliefReason;
         if (!validateReliefDesign(dp, &reliefReason)) {
@@ -738,17 +770,56 @@ void GearAutoOptManager::evaluateInfillByCcxParallel(
     for (const InfillCasePrep& prep : preps)
         prepByIndex.insert(prep.index, prep);
 
-    const GearOptConfig cfgCopy     = _cfg;
-    const QString       runIdCopy   = _runId;
+    const GearOptConfig cfgCopy      = _cfg;
+    const QString       runIdCopy    = _runId;
     const double        meshSizeCopy = _fixedMeshSizeMm;
     const double        rootMeshCopy = _fixedRootMeshSizeMm;
     const int           zLayersCopy  = _fixedZLayers;
+    const GearLogLevel  logLevelCopy =
+        _cfg.solver.debugMode ? GearLogLevel::Debug : GearLogLevel::Normal;
+    const GearMeshParams meshParamsCopy = {meshSizeCopy, rootMeshCopy, zLayersCopy};
+
+    emit log(QStringLiteral("[GearOpt][Parallel] geometry prep on main thread (serial), cases=%1")
+                 .arg(runQueue.size()));
+
+    QVector<int> ccxQueue;
+    ccxQueue.reserve(runQueue.size());
+    for (int idx : runQueue) {
+        if (!prepByIndex.contains(idx))
+            continue;
+        InfillCasePrep prep = prepByIndex.value(idx);
+
+        GearOptCasePrepRequest prepReq;
+        prepReq.dp         = prep.dp;
+        prepReq.workDir    = prep.workDir;
+        prepReq.cfg        = cfgCopy;
+        prepReq.meshParams = meshParamsCopy;
+        prepReq.logLevel   = logLevelCopy;
+        prepReq.threads    = _cfg.solver.threads;
+
+        ParallelCcxOutcome& out = outcomes[idx];
+        if (GearOptMainThreadRunner::runPreCcxBlocking(&prepReq)) {
+            out.dp     = prepReq.dp;
+            ccxQueue.append(idx);
+        } else {
+            out.dp            = prepReq.dp;
+            out.skippedByCache = false;
+            out.ccxRan         = false;
+            emit log(QStringLiteral("[GearOpt][Parallel] case id=%1 geometry/mesh/inp failed: %2")
+                         .arg(idx)
+                         .arg(out.dp.errorMsg.left(200)));
+        }
+    }
+
+    const GearOptConfig cfgCopyCcx     = cfgCopy;
+    const QString       runIdCopyCcx   = runIdCopy;
+    const GearLogLevel  logLevelCopyCcx = logLevelCopy;
 
     int batchNum = 0;
-    for (int batchStart = 0; batchStart < runQueue.size() && !_stopRequested; batchStart += jobs) {
-        const int batchEnd = std::min(batchStart + jobs, static_cast<int>(runQueue.size()));
+    for (int batchStart = 0; batchStart < ccxQueue.size() && !_stopRequested; batchStart += jobs) {
+        const int batchEnd = std::min(batchStart + jobs, static_cast<int>(ccxQueue.size()));
         ++batchNum;
-        emit log(QStringLiteral("[GearOpt][Parallel] batch %1 started, cases=%2")
+        emit log(QStringLiteral("[GearOpt][Parallel] CCX batch %1 started, cases=%2")
                      .arg(batchNum)
                      .arg(batchEnd - batchStart));
 
@@ -756,34 +827,30 @@ void GearAutoOptManager::evaluateInfillByCcxParallel(
         futures.reserve(batchEnd - batchStart);
 
         for (int qi = batchStart; qi < batchEnd; ++qi) {
-            const int idx = runQueue[qi];
+            const int idx = ccxQueue[qi];
             if (!prepByIndex.contains(idx))
                 continue;
 
             const InfillCasePrep prep = prepByIndex.value(idx);
-            futures.push_back(std::async(std::launch::async, [prep, cfgCopy, runIdCopy, meshSizeCopy,
-                                                              rootMeshCopy, zLayersCopy, threadsPerJob,
-                                                              generation]() {
+            futures.push_back(std::async(std::launch::async, [prep, cfgCopyCcx, runIdCopyCcx, meshParamsCopy,
+                                                              logLevelCopyCcx, threadsPerJob, generation]() {
                 ParallelCcxOutcome out;
                 out.index          = prep.index;
                 out.skippedByCache = false;
                 out.ccxRan         = true;
                 out.dp             = prep.dp;
+                out.dp.runDir      = prep.workDir;
 
                 const auto t0 = std::chrono::steady_clock::now();
                 try {
                     GearOptCaseRunner runner(nullptr);
-                    runner.setConfig(cfgCopy);
+                    runner.setConfig(cfgCopyCcx);
                     runner.setWorkDir(prep.workDir);
-                    GearMeshParams meshParams;
-                    meshParams.globalSize = meshSizeCopy;
-                    meshParams.rootSize   = rootMeshCopy;
-                    meshParams.zLayers    = zLayersCopy;
-                    runner.setMeshParams(meshParams);
-                    runner.setLogLevel(cfgCopy.solver.debugMode ? GearLogLevel::Debug
-                                                                 : GearLogLevel::Normal);
+                    runner.setMeshParams(meshParamsCopy);
+                    runner.setLogLevel(logLevelCopyCcx);
                     runner.setThreads(threadsPerJob);
-                    runner.runOne(out.dp);
+                    if (runner.runCcxOnlySteps(out.dp))
+                        out.dp.status = PointStatus::Done;
                     out.dp.fillResultArtifactPaths();
                 } catch (const std::exception& ex) {
                     out.dp.status   = PointStatus::Failed;
@@ -792,7 +859,7 @@ void GearAutoOptManager::evaluateInfillByCcxParallel(
                     out.dp.status   = PointStatus::Failed;
                     out.dp.errorMsg = QStringLiteral("parallel CCX worker unknown exception");
                 }
-                out.dp.runId            = runIdCopy;
+                out.dp.runId            = runIdCopyCcx;
                 out.dp.generation       = generation;
                 out.dp.runDir           = prep.workDir;
                 out.dp.rank             = prep.ind.rank;
@@ -807,14 +874,14 @@ void GearAutoOptManager::evaluateInfillByCcxParallel(
         for (auto& fut : futures) {
             ParallelCcxOutcome out = fut.get();
             outcomes[out.index]      = out;
-            const bool converged     = ccxCaseConverged(cfgCopy, out.dp);
+            const bool converged     = ccxCaseConverged(cfgCopyCcx, out.dp);
             emit log(QStringLiteral("[GearOpt][Parallel] case id=%1 finished converged=%2 time=%3s")
                          .arg(out.index)
                          .arg(converged ? QStringLiteral("true") : QStringLiteral("false"))
                          .arg(out.elapsedMs / 1000));
         }
 
-        emit log(QStringLiteral("[GearOpt][Parallel] batch %1 done").arg(batchNum));
+        emit log(QStringLiteral("[GearOpt][Parallel] CCX batch %1 done").arg(batchNum));
     }
 
     emit log(QStringLiteral("[GearOpt][Parallel] writing DB in main thread"));
@@ -832,14 +899,20 @@ void GearAutoOptManager::evaluateInfillByCcxParallel(
         GearDesignPoint dp        = outcomes[i].dp;
         dp.fillResultArtifactPaths();
 
-        auto insertToDb = [&](GearOptResultDatabase& db) {
+        auto insertToDb = [&](GearOptResultDatabase& db, const char* label) {
             if (!db.isOpen())
                 return;
-            db.insertDesignPointResult(_runId, dp, generation, i, ind.rank, ind.crowdingDist,
+            const bool ok = db.insertDesignPointResult(_runId, dp, generation, i, ind.rank, ind.crowdingDist,
                                        dp.isPareto, prep.caseHash);
+            emit log(QStringLiteral("[GearOpt][Case] case_id=%1 case_hash=%2 workDir=%3 dbUpdateStatus=%4 db=%5")
+                         .arg(i)
+                         .arg(prep.caseHash)
+                         .arg(dp.runDir)
+                         .arg(ok ? QStringLiteral("insert_ok") : QStringLiteral("insert_failed"))
+                         .arg(QString::fromLatin1(label)));
         };
-        insertToDb(GearOptResultDatabase::global());
-        insertToDb(GearOptResultDatabase::runSession());
+        insertToDb(GearOptResultDatabase::global(), "global");
+        insertToDb(GearOptResultDatabase::runSession(), "run");
 
         if (dp.status == PointStatus::Done && dp.cpressActiveNodes > 0
             && QFileInfo::exists(dp.frdPath)) {
@@ -988,6 +1061,7 @@ void GearAutoOptManager::evaluatePopulationBySurrogate(Population& pop,
 
 void GearAutoOptManager::start() {
     emit log(QStringLiteral("GearAutoOptManager: start"));
+    connectMainThreadRunnerLogs(this);
     _stopRequested = false;
     _allPoints.clear();
     logEnabledObjectives(_cfg, [this](const QString& msg) { emit log(msg); });
@@ -1118,6 +1192,7 @@ void GearAutoOptManager::start() {
 void GearAutoOptManager::startSurrogateAssisted()
 {
     emit log(QStringLiteral("GearAutoOptManager: startSurrogateAssisted"));
+    connectMainThreadRunnerLogs(this);
     _stopRequested = false;
     _allPoints.clear();
     logSurrogateFixedObjectives([this](const QString& msg) { emit log(msg); });
@@ -1170,11 +1245,14 @@ void GearAutoOptManager::startSurrogateAssisted()
                  .arg(globalTotal)
                  .arg(baseCountGlobal));
 
+    SurrogateSampleLoadStats sampleStats;
     QVector<SurrogateSample> samples =
-        loadMergedValidatedSamples(baseCaseH, _fixedCommonWidthMm, _cfg);
-    emit log(QStringLiteral("[GearOpt][Surrogate] merged validated samples (width=%1 mm): %2")
-                 .arg(_fixedCommonWidthMm, 0, 'g', 6)
-                 .arg(samples.size()));
+        loadMergedValidatedSamples(baseCaseH, _fixedCommonWidthMm, _cfg, &sampleStats);
+    emit log(QStringLiteral("[GearOpt][Surrogate] training samples: total=%1 valid=%2 failed_skipped=%3 (width=%4 mm)")
+                 .arg(sampleStats.totalSamples)
+                 .arg(sampleStats.validSamples)
+                 .arg(sampleStats.failedSkipped)
+                 .arg(_fixedCommonWidthMm, 0, 'g', 6));
 
     auto supplementValidatedSamples = [&](int generationBase) -> bool {
         constexpr int kMaxAttempts = 20;
@@ -1206,7 +1284,7 @@ void GearAutoOptManager::startSurrogateAssisted()
             if (_stopRequested)
                 return false;
 
-            samples = loadMergedValidatedSamples(baseCaseH, _fixedCommonWidthMm, _cfg);
+            samples = loadMergedValidatedSamples(baseCaseH, _fixedCommonWidthMm, _cfg, &sampleStats);
             const int newValidated = std::max(0, samples.size() - before);
             const int duplicateOrFailed = std::max(0, batchN - newValidated - supplementStats.reusedCacheCount);
             emit log(QStringLiteral("[GearOpt][Surrogate] LHS supplement result: new_validated=%1 cache_hit=%2 duplicate_or_failed=%3 total=%4/%5")
@@ -1359,12 +1437,15 @@ void GearAutoOptManager::startSurrogateAssisted()
 
         QSet<QString> knownCaseHashes;
         QSet<QString> knownDesignHashes;
+        QSet<QString> failedCaseHashes;
         auto mergeKnownHashes = [&](GearOptResultDatabase& db) {
             if (db.isOpen()) {
                 knownCaseHashes.unite(
                     db.knownCaseHashesForBaseCase(baseCaseH, _fixedCommonWidthMm));
                 knownDesignHashes.unite(
                     db.knownDesignHashesForBaseCase(baseCaseH, _fixedCommonWidthMm));
+                failedCaseHashes.unite(
+                    db.failedCaseHashesForBaseCase(baseCaseH, _fixedCommonWidthMm));
             }
         };
         mergeKnownHashes(GearOptResultDatabase::global());
@@ -1393,7 +1474,8 @@ void GearAutoOptManager::startSurrogateAssisted()
 
         Population infill = GearInfillSelector::selectSparseParetoPoints(
             surrogatePareto, samples, sampleResiduals, infillScoring, _cfg, baseDp,
-            _fixedMeshSizeMm, _runMeshAuto, knownCaseHashes, knownDesignHashes, infillCount);
+            _fixedMeshSizeMm, _runMeshAuto, knownCaseHashes, knownDesignHashes, failedCaseHashes,
+            infillCount);
         if (infill.size() < infillCount) {
             QSet<QString> fallbackKnownHashes = knownCaseHashes;
             QSet<QString> fallbackKnownDesignHashes = knownDesignHashes;
@@ -1404,7 +1486,7 @@ void GearAutoOptManager::startSurrogateAssisted()
             Population fallback = GearInfillSelector::selectSparseParetoPoints(
                 surrogatePop, samples, sampleResiduals, infillScoring, _cfg, baseDp,
                 _fixedMeshSizeMm, _runMeshAuto, fallbackKnownHashes, fallbackKnownDesignHashes,
-                remaining);
+                failedCaseHashes, remaining);
             if (!fallback.isEmpty()) {
                 emit log(QStringLiteral("[GearOpt][Surrogate] round %1: Pareto infill selected=%2, sparse fallback added=%3")
                              .arg(round)
@@ -1586,7 +1668,7 @@ void GearAutoOptManager::startSurrogateAssisted()
         const double rmaeSigmaNew  = computeRmae(predSigmaNew, trueSigmaNew);
         const double rmaeU         = computeRmae(predUAll, trueUAll);
 
-        samples = loadMergedValidatedSamples(baseCaseH, _fixedCommonWidthMm, _cfg);
+        samples = loadMergedValidatedSamples(baseCaseH, _fixedCommonWidthMm, _cfg, &sampleStats);
         logBestRealSoFar(samples, round, _cfg, [this](const QString& msg) { emit log(msg); });
 
         const Population ccxPop = populationFromValidatedSamples(samples, _cfg);
