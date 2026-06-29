@@ -777,12 +777,14 @@ void GearOptDialog::onRetryFailedCases()
 	}
 
 	FailedCaseRetryOptions opt;
-	opt.cfg                = cfg;
-	opt.runDir             = runDir;
-	opt.fixedMeshSizeMm    = cfg.solver.meshSize;
-	opt.runMeshAuto        = cfg.solver.meshSize <= 0.0;
-	opt.baseCaseHash       = QString(); // 不过滤 base_case_hash，重算库中全部 failed
-	opt.fixedCommonWidthMm = -1.0;      // 不过滤齿宽
+	opt.cfg                   = cfg;
+	opt.runDir                = runDir;
+	opt.fixedMeshSizeMm       = cfg.solver.meshSize;
+	opt.fixedRootMeshSizeMm   = cfg.solver.meshRootSizeMm;
+	opt.fixedZLayers          = cfg.solver.meshZLayers;
+	opt.runMeshAuto           = cfg.solver.meshSize <= 0.0;
+	opt.baseCaseHash          = QString();
+	opt.fixedCommonWidthMm    = -1.0;
 
 	if (_log)
 		_log->append(QString::fromUtf8("[Retry] 开始重算 failed 样本（按数据库设计变量重新建模+CCX）…"));
@@ -813,11 +815,15 @@ void GearOptDialog::onRetryFailedCasesFinished(const FailedCaseRetryStats& stats
 	                        "total_failed = %1\n"
 	                        "retried = %2\n"
 	                        "fixed = %3\n"
-	                        "still_failed = %4")
+	                        "still_failed = %4\n"
+	                        "invalid_skipped = %5\n"
+	                        "mesh_timeout_failed = %6")
 	                        .arg(stats.totalFailed)
 	                        .arg(stats.retried)
 	                        .arg(stats.fixed)
-	                        .arg(stats.stillFailed);
+	                        .arg(stats.stillFailed)
+	                        .arg(stats.invalidSkipped)
+	                        .arg(stats.meshTimeoutFailed);
 	if (_log)
 		_log->append(QString::fromUtf8("[Retry] 完成\n") + msg);
 	QMessageBox::information(this, QString::fromUtf8("重算完成"), msg);

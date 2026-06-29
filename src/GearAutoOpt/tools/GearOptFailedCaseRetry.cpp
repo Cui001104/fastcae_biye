@@ -62,6 +62,76 @@ void updateRowsInDatabase(GearOptResultDatabase& db,
 	}
 }
 
+void markInvalidReliefInDatabase(GearOptResultDatabase& db,
+                                 const FailedCaseRecord& rec,
+                                 const QString& errorMsg,
+                                 const std::function<void(const QString&)>& logFn)
+{
+	if (!db.isOpen())
+		return;
+
+	const QString msg = errorMsg.startsWith(QStringLiteral("invalid relief"), Qt::CaseInsensitive)
+	                        ? errorMsg
+	                        : QStringLiteral("invalid relief: %1").arg(errorMsg);
+	for (const FailedCaseDbRow& row : rec.dbRows) {
+		if (row.databasePath != db.databasePath())
+			continue;
+		const bool ok = db.markDesignInvalidByRowId(row.rowId, msg);
+		if (logFn) {
+			logFn(QStringLiteral("[Retry] case_hash=%1 row_id=%2 status=invalid dbUpdateStatus=%3 | %4")
+			          .arg(rec.caseHash)
+			          .arg(row.rowId)
+			          .arg(ok ? QStringLiteral("update_ok") : QStringLiteral("update_failed"))
+			          .arg(msg.left(160)));
+		}
+	}
+}
+
+bool isGmshTimeoutError(const QString& err)
+{
+	return err.contains(QStringLiteral("gmsh timeout"), Qt::CaseInsensitive);
+}
+
+bool shouldMarkInvalidRelief(const GearDesignPoint& dp, QString* reason)
+{
+	if (isInvalidReliefDesign(dp, reason))
+		return true;
+	if (dp.errorMsg.contains(QStringLiteral("invalid relief"), Qt::CaseInsensitive))
+		return true;
+	if (dp.errorMsg.contains(QStringLiteral("requires lca"), Qt::CaseInsensitive)) {
+		if (reason)
+			*reason = dp.errorMsg;
+		return true;
+	}
+	return false;
+}
+
+GearMeshParams resolveMeshParamsForRetry(const GearDesignPoint& dp,
+                                         const FailedCaseRetryOptions& opt,
+                                         const GearOptConfig& cfg)
+{
+	double globalSize = dp.meshSize_mm;
+	if (globalSize <= 0.0) {
+		if (opt.fixedMeshSizeMm > 0.0)
+			globalSize = opt.fixedMeshSizeMm;
+		else if (cfg.solver.meshSize > 0.0)
+			globalSize = cfg.solver.meshSize;
+	}
+	if (globalSize <= 0.0)
+		globalSize = 1.50;
+
+	double rootSize = opt.fixedRootMeshSizeMm > 0.0 ? opt.fixedRootMeshSizeMm
+	                                                : cfg.solver.meshRootSizeMm;
+	if (rootSize <= 0.0)
+		rootSize = 0.40;
+
+	int zLayers = opt.fixedZLayers > 0 ? opt.fixedZLayers : cfg.solver.meshZLayers;
+	if (zLayers <= 0)
+		zLayers = GearOptCaseRunner::computeAutoZLayers(dp.commonWidth);
+
+	return GearMeshParams{ globalSize, rootSize, zLayers };
+}
+
 /// 仅补全表中缺失的仿真字段，不覆盖 DB 已存的设计变量与工况参数。
 void fillMissingRunSimFields(GearDesignPoint& dp, const GearOptConfig& cfg)
 {
@@ -144,26 +214,60 @@ FailedCaseRetryStats GearOptFailedCaseRetry::run(const FailedCaseRetryOptions& o
 
 	for (auto it = merged.constBegin(); it != merged.constEnd(); ++it) {
 		const FailedCaseRecord& rec = it.value();
-		++stats.retried;
 
 		GearDesignPoint dp = rec.dp;
+
+		QString invalidReason;
+		if (shouldMarkInvalidRelief(dp, &invalidReason)) {
+			logInvalidReliefDesign(dp, invalidReason);
+			if (logFn) {
+				logFn(QStringLiteral("[Retry] skip invalid relief (no modeling/retry) case_hash=%1 | %2")
+				          .arg(rec.caseHash, invalidReason));
+			}
+			markInvalidReliefInDatabase(runDb, rec, invalidReason, logFn);
+			markInvalidReliefInDatabase(globalDb, rec, invalidReason, logFn);
+			++stats.invalidSkipped;
+			if (QApplication::instance())
+				QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+			continue;
+		}
+
 		dp.status   = PointStatus::Running;
 		dp.errorMsg.clear();
 		fillMissingRunSimFields(dp, runCfg);
 
-		QString reliefReason;
-		if (!validateReliefDesign(dp, &reliefReason)) {
-			++stats.stillFailed;
-			const QString err = QStringLiteral("invalid relief: %1").arg(reliefReason);
-			logInvalidReliefDesign(dp, reliefReason);
+		if (!validateReliefDesign(dp, &invalidReason)) {
+			logInvalidReliefDesign(dp, invalidReason);
 			if (logFn)
-				logFn(QStringLiteral("[Retry] skip case_hash=%1 | %2").arg(rec.caseHash, err));
+				logFn(QStringLiteral("[Retry] mark invalid relief case_hash=%1 | %2")
+				          .arg(rec.caseHash, invalidReason));
+			markInvalidReliefInDatabase(runDb, rec, invalidReason, logFn);
+			markInvalidReliefInDatabase(globalDb, rec, invalidReason, logFn);
+			++stats.invalidSkipped;
+			if (QApplication::instance())
+				QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+			continue;
+		}
+
+		const GearMeshParams meshParams = resolveMeshParamsForRetry(dp, opt, runCfg);
+		if (meshParams.zLayers <= 0) {
+			const QString err = QStringLiteral("invalid mesh params: zLayers <= 0");
+			if (logFn) {
+				logFn(QStringLiteral("[Retry] skip case_hash=%1 | %2 (global=%3 root=%4)")
+				          .arg(rec.caseHash)
+				          .arg(err)
+				          .arg(meshParams.globalSize, 0, 'f', 2)
+				          .arg(meshParams.rootSize, 0, 'f', 2));
+			}
+			++stats.stillFailed;
 			updateRowsInDatabase(runDb, rec, dp, false, err, logFn);
 			updateRowsInDatabase(globalDb, rec, dp, false, err, logFn);
 			if (QApplication::instance())
 				QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 			continue;
 		}
+
+		++stats.retried;
 
 		const int attempt  = maxRetryCountForRecord(rec) + 1;
 		const QString workDir =
@@ -179,11 +283,6 @@ FailedCaseRetryStats GearOptFailedCaseRetry::run(const FailedCaseRetryOptions& o
 		QDir().mkpath(workDir);
 		dp.runDir = workDir;
 
-		const double meshSize =
-		    dp.meshSize_mm > 0.0 ? dp.meshSize_mm
-		                         : (opt.fixedMeshSizeMm > 0.0 ? opt.fixedMeshSizeMm : 0.0);
-		const bool meshAuto = dp.meshAuto || meshSize <= 0.0;
-
 		if (logFn) {
 			logFn(QStringLiteral("[Retry] case_id=%1 case_hash=%2 workDir=%3 attempt=%4")
 			          .arg(dp.id)
@@ -192,15 +291,21 @@ FailedCaseRetryStats GearOptFailedCaseRetry::run(const FailedCaseRetryOptions& o
 			          .arg(attempt));
 			logFn(QStringLiteral("[Retry] DB design -> %1")
 			          .arg(GearInfillSelector::formatDesignVarsForLog(dp)));
-			logFn(QStringLiteral("[Retry] DB sim -> m=%1 z1=%2 z2=%3 alpha=%4 width=%5 torque=%6 meshAuto=%7 meshSize=%8")
+			logFn(QStringLiteral("[Retry] DB sim -> m=%1 z1=%2 z2=%3 alpha=%4 width=%5 torque=%6 meshAuto=%7 meshSize_mm=%8")
 			          .arg(dp.module, 0, 'g', 8)
 			          .arg(dp.z1)
 			          .arg(dp.z2)
 			          .arg(dp.alpha, 0, 'g', 8)
 			          .arg(dp.commonWidth, 0, 'g', 8)
 			          .arg(dp.torque_Nm, 0, 'g', 8)
-			          .arg(meshAuto ? QStringLiteral("true") : QStringLiteral("false"))
-			          .arg(meshSize, 0, 'g', 8));
+			          .arg(dp.meshAuto ? QStringLiteral("true") : QStringLiteral("false"))
+			          .arg(dp.meshSize_mm, 0, 'g', 8));
+			logFn(QStringLiteral("[Retry] meshParams -> global=%1 root=%2 zLayers=%3 (cfg zLayers=%4 root=%5)")
+			          .arg(meshParams.globalSize, 0, 'g', 6)
+			          .arg(meshParams.rootSize, 0, 'g', 6)
+			          .arg(meshParams.zLayers)
+			          .arg(runCfg.solver.meshZLayers)
+			          .arg(runCfg.solver.meshRootSizeMm, 0, 'g', 6));
 			logFn(QStringLiteral("[Retry] pipeline: geometry -> mesh -> inp -> ccx -> parse"));
 		}
 
@@ -208,7 +313,7 @@ FailedCaseRetryStats GearOptFailedCaseRetry::run(const FailedCaseRetryOptions& o
 		prepReq.dp         = dp;
 		prepReq.workDir    = workDir;
 		prepReq.cfg        = runCfg;
-		prepReq.meshParams = { meshSize, opt.fixedRootMeshSizeMm, opt.fixedZLayers };
+		prepReq.meshParams = meshParams;
 		prepReq.logLevel   = runCfg.solver.debugMode ? GearLogLevel::Debug : GearLogLevel::Normal;
 		prepReq.threads    = runCfg.solver.threads;
 
@@ -226,7 +331,7 @@ FailedCaseRetryStats GearOptFailedCaseRetry::run(const FailedCaseRetryOptions& o
 			GearOptCaseRunner ccxRunner;
 			ccxRunner.setConfig(runCfg);
 			ccxRunner.setWorkDir(workDir);
-			ccxRunner.setMeshParams(prepReq.meshParams);
+			ccxRunner.setMeshParams(meshParams);
 			ccxRunner.setLogLevel(prepReq.logLevel);
 			ccxRunner.setThreads(runCfg.solver.threads);
 			QMetaObject::Connection ccxLogConn;
@@ -266,10 +371,13 @@ FailedCaseRetryStats GearOptFailedCaseRetry::run(const FailedCaseRetryOptions& o
 				          .arg(dp.sigmaMax, 0, 'g', 6));
 			}
 		} else {
-			++stats.stillFailed;
 			const QString err = dp.errorMsg.isEmpty()
 			                        ? QStringLiteral("retry failed without CCX convergence")
 			                        : dp.errorMsg;
+			if (isGmshTimeoutError(err))
+				++stats.meshTimeoutFailed;
+			else
+				++stats.stillFailed;
 			updateRowsInDatabase(runDb, rec, dp, false, err, logFn);
 			updateRowsInDatabase(globalDb, rec, dp, false, err, logFn);
 		}
@@ -279,11 +387,13 @@ FailedCaseRetryStats GearOptFailedCaseRetry::run(const FailedCaseRetryOptions& o
 	}
 
 	if (logFn) {
-		logFn(QStringLiteral("[Retry] done: total=%1 retried=%2 fixed=%3 still_failed=%4")
+		logFn(QStringLiteral("[Retry] done: total_failed=%1 retried=%2 fixed=%3 still_failed=%4 invalid_skipped=%5 mesh_timeout_failed=%6")
 		          .arg(stats.totalFailed)
 		          .arg(stats.retried)
 		          .arg(stats.fixed)
-		          .arg(stats.stillFailed));
+		          .arg(stats.stillFailed)
+		          .arg(stats.invalidSkipped)
+		          .arg(stats.meshTimeoutFailed));
 	}
 	return stats;
 }

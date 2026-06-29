@@ -96,7 +96,7 @@ bool computeConvergedFromMetrics(const GearDesignPoint& dp)
 
 int computeIsValidFlag(const GearDesignPoint& dp)
 {
-	if (dp.status == PointStatus::Failed)
+	if (dp.status == PointStatus::Failed || dp.status == PointStatus::Invalid)
 		return 0;
 	if (dp.cpressMax_MPa < 0.0 || dp.sigmaMax < 0.0 || dp.uMax < 0.0 || dp.mass < 0.0)
 		return 0;
@@ -1045,7 +1045,7 @@ QSet<QString> GearOptResultDatabase::failedCaseHashesForBaseCase(const QString& 
 	    "SELECT DISTINCT case_hash FROM gear_opt_results"
 	    " WHERE base_case_hash = ?"
 	    " AND case_hash IS NOT NULL AND TRIM(case_hash) != ''"
-	    " AND (status = 'failed' OR cpressMax_MPa < 0 OR is_valid = 0)");
+	    " AND (status = 'failed' OR status = 'invalid' OR cpressMax_MPa < 0 OR is_valid = 0)");
 	if (fixedWidthMm >= 0.0)
 		sql += QStringLiteral(" AND ABS(width - ?) < 1e-6");
 	query.prepare(sql);
@@ -1105,6 +1105,8 @@ QVector<FailedCaseRecord> GearOptResultDatabase::loadFailedCasesForRetry(const Q
 	    " solverName, solverPath, staticStep, runDir, retry_count, errorMsg"
 	    " FROM gear_opt_results"
 	    " WHERE (status = 'failed' OR cpressMax_MPa < 0 OR sigmaMax_MPa < 0)"
+	    " AND status != 'invalid'"
+	    " AND status != 'infeasible'"
 	    " AND case_hash IS NOT NULL AND TRIM(case_hash) != ''");
 	if (!baseCaseH.isEmpty())
 		sql += QStringLiteral(" AND base_case_hash = ?");
@@ -1273,7 +1275,7 @@ bool GearOptResultDatabase::updateDesignPointResultByRowId(int rowId, const Gear
 	query.bindValue(b++, store.nodeCount);
 	query.bindValue(b++, store.elementCount);
 	query.bindValue(b++, pointStatusToString(store.status));
-	query.bindValue(b++, QString());
+	query.bindValue(b++, store.errorMsg);
 	query.bindValue(b++, store.runDir);
 	query.bindValue(b++, store.meshInpPath);
 	query.bindValue(b++, store.jobInpPath);
@@ -1324,6 +1326,34 @@ bool GearOptResultDatabase::recordRetryFailureByRowId(int rowId, const QString& 
 	qDebug().noquote() << QStringLiteral("[GearOpt][DB] retry failed row_id=%1 error=%2")
 	                      .arg(rowId)
 	                      .arg(errorMsg.left(120));
+	return true;
+}
+
+bool GearOptResultDatabase::markDesignInvalidByRowId(int rowId, const QString& lastErrorMessage)
+{
+	if (!isOpen() || rowId <= 0)
+		return false;
+
+	const QString now   = QDateTime::currentDateTime().toString(Qt::ISODate);
+	const QString msg   = lastErrorMessage.left(2000);
+	QSqlDatabase db     = QSqlDatabase::database(connectionName(), false);
+	QSqlQuery      query(db);
+	query.prepare(QStringLiteral(
+	    "UPDATE gear_opt_results SET"
+	    " status='invalid', converged=0, is_valid=0,"
+	    " errorMsg=?, last_error_message=?, last_retry_time=?"
+	    " WHERE id=?"));
+	query.addBindValue(msg);
+	query.addBindValue(msg);
+	query.addBindValue(now);
+	query.addBindValue(rowId);
+	if (!query.exec()) {
+		logSqlQuery(query, "markDesignInvalidByRowId");
+		return false;
+	}
+	qDebug().noquote() << QStringLiteral("[GearOpt][DB] mark invalid row_id=%1 error=%2")
+	                      .arg(rowId)
+	                      .arg(msg.left(120));
 	return true;
 }
 

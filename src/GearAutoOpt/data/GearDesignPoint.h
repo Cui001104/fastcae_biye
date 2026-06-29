@@ -24,7 +24,8 @@ enum class PointStatus {
 	Running,        ///< 求解中
 	Done,           ///< 求解成功，σ_max 等已写入
 	Failed,         ///< 求解失败 (CCX 崩溃 / 网格问题)
-	Infeasible      ///< 几何/物理约束不通过 (根切等)，跳过求解
+	Infeasible,     ///< 几何/物理约束不通过 (根切等)，跳过求解
+	Invalid         ///< 设计变量非法 (如 ca>0 且 lca<=0)，不参与求解/重算
 };
 
 GEARAUTOOPTAPI QString  pointStatusToString(PointStatus s);
@@ -156,6 +157,9 @@ struct GEARAUTOOPTAPI GearDesignPoint {
 /// 修形变量合法性：ca≈0 时强制 lca=0；ca>0 时要求 lca≥kMinReliefLength。
 /// 返回 false 时 reason 写入原因；p 中已关闭的修形会被归一化为 ca=lca=0。
 GEARAUTOOPTAPI bool validateReliefDesign(GearDesignPoint& p, QString* reason = nullptr);
+
+/// 只读：ca>0 时 lca 必须 ≥ 0.1 mm。
+GEARAUTOOPTAPI bool isInvalidReliefDesign(const GearDesignPoint& p, QString* reason = nullptr);
 
 /// 统一输出无效修形跳过日志。
 GEARAUTOOPTAPI void logInvalidReliefDesign(const GearDesignPoint& p, const QString& reason);

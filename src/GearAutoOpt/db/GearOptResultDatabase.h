@@ -48,6 +48,8 @@ struct FailedCaseRetryStats {
 	int retried{0};
 	int fixed{0};
 	int stillFailed{0};
+	int invalidSkipped{0};
+	int meshTimeoutFailed{0};
 };
 
 /// SQLite 持久化：gear_opt_results 主表。
@@ -113,6 +115,9 @@ public:
 
 	/// 重算仍失败：保留 failed，递增 retry_count 并记录 last_error_message。
 	bool recordRetryFailureByRowId(int rowId, const QString& errorMsg);
+
+	/// 非法设计（如 invalid relief）：status=invalid, is_valid=0，不递增 retry_count。
+	bool markDesignInvalidByRowId(int rowId, const QString& lastErrorMessage);
 
 	QVector<int> findRowIdsByCaseHash(const QString& caseHash) const;
 

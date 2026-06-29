@@ -20,6 +20,7 @@ QString pointStatusToString(PointStatus s)
 	case PointStatus::Done:       return QStringLiteral("done");
 	case PointStatus::Failed:     return QStringLiteral("failed");
 	case PointStatus::Infeasible: return QStringLiteral("infeasible");
+	case PointStatus::Invalid:    return QStringLiteral("invalid");
 	}
 	return QStringLiteral("pending");
 }
@@ -32,6 +33,7 @@ PointStatus pointStatusFromString(const QString& s)
 	if(k == "done")       return PointStatus::Done;
 	if(k == "failed")     return PointStatus::Failed;
 	if(k == "infeasible") return PointStatus::Infeasible;
+	if(k == "invalid")    return PointStatus::Invalid;
 	return PointStatus::Pending;
 }
 
@@ -283,6 +285,29 @@ void GearDesignPoint::syncLegacyResultFields()
 		mass = mass_total;
 }
 
+bool isInvalidReliefDesign(const GearDesignPoint& p, QString* reason)
+{
+	if (p.ca1 > kCaEps && p.lca1 < kMinReliefLength) {
+		if (reason) {
+			*reason = QStringLiteral("ca1=%1 > 0 requires lca1 >= %2 mm, got lca1=%3")
+			              .arg(p.ca1, 0, 'g', 8)
+			              .arg(kMinReliefLength, 0, 'g', 6)
+			              .arg(p.lca1, 0, 'g', 8);
+		}
+		return true;
+	}
+	if (p.ca2 > kCaEps && p.lca2 < kMinReliefLength) {
+		if (reason) {
+			*reason = QStringLiteral("ca2=%1 > 0 requires lca2 >= %2 mm, got lca2=%3")
+			              .arg(p.ca2, 0, 'g', 8)
+			              .arg(kMinReliefLength, 0, 'g', 6)
+			              .arg(p.lca2, 0, 'g', 8);
+		}
+		return true;
+	}
+	return false;
+}
+
 bool validateReliefDesign(GearDesignPoint& p, QString* reason)
 {
 	if (p.ca1 <= kCaEps) {
@@ -294,24 +319,8 @@ bool validateReliefDesign(GearDesignPoint& p, QString* reason)
 		p.lca2 = 0.0;
 	}
 
-	if (p.ca1 > kCaEps && p.lca1 < kMinReliefLength) {
-		if (reason) {
-			*reason = QStringLiteral("ca1=%1 > 0 requires lca1 >= %2 mm, got lca1=%3")
-			              .arg(p.ca1, 0, 'g', 8)
-			              .arg(kMinReliefLength, 0, 'g', 6)
-			              .arg(p.lca1, 0, 'g', 8);
-		}
+	if (isInvalidReliefDesign(p, reason))
 		return false;
-	}
-	if (p.ca2 > kCaEps && p.lca2 < kMinReliefLength) {
-		if (reason) {
-			*reason = QStringLiteral("ca2=%1 > 0 requires lca2 >= %2 mm, got lca2=%3")
-			              .arg(p.ca2, 0, 'g', 8)
-			              .arg(kMinReliefLength, 0, 'g', 6)
-			              .arg(p.lca2, 0, 'g', 8);
-		}
-		return false;
-	}
 	return true;
 }
 

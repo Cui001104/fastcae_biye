@@ -14,8 +14,8 @@ struct FailedCaseRetryOptions {
 	GearOptConfig cfg;
 	QString       runDir;
 	double        fixedMeshSizeMm{0.0};
-	double        fixedRootMeshSizeMm{0.0};
-	int           fixedZLayers{0};
+	double        fixedRootMeshSizeMm{0.40};
+	int           fixedZLayers{-1}; ///< <=0 表示按 cfg 或齿宽自动
 	bool          runMeshAuto{true};
 	QString       baseCaseHash;
 	double        fixedCommonWidthMm{-1.0};

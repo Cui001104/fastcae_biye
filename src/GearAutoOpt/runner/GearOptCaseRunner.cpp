@@ -515,9 +515,11 @@ void writeGearGeoContent(QTextStream& ts, bool twoGears, double meshSize, double
 		ts << "// root refine disabled: rootCurveTags empty, fallback to global mesh only\n";
 	}
 
-	if (!zCurveTags.isEmpty()) {
+	if (!zCurveTags.isEmpty() && zLayers > 0) {
 		ts << "// z-direction transfinite layering\n";
 		ts << "Transfinite Line {" << formatCurveTagList(zCurveTags) << "} = " << zLayers << ";\n";
+	} else if (debugHeader && !zCurveTags.isEmpty() && zLayers <= 0) {
+		ts << "// z-direction transfinite skipped: zLayers=" << zLayers << " (invalid)\n";
 	}
 
 	ts << "Mesh.MeshSizeMax = " << QString::number(meshSize, 'g', 6) << ";\n";
@@ -558,9 +560,9 @@ void GearOptCaseRunner::runOne(GearDesignPoint& dp) {
 }
 
 void GearOptCaseRunner::setMeshParams(const GearMeshParams& p) {
-	_meshSize         = p.globalSize;
-	_rootMeshSize     = p.rootSize > 0.0 ? p.rootSize : 0.40;
-	_zLayersOverride  = p.zLayers;
+	_meshSize        = p.globalSize;
+	_rootMeshSize    = p.rootSize > 0.0 ? p.rootSize : 0.40;
+	_zLayersOverride = p.zLayers > 0 ? p.zLayers : -1;
 }
 
 int GearOptCaseRunner::computeAutoZLayers(double widthMm) {
@@ -839,9 +841,16 @@ bool GearOptCaseRunner::runMeshStep(GearDesignPoint& dp) {
 	if (twoGears)
 		mergeZCurveCollectResults(zCollect1, zCollect2, &zCollectAll);
 
-	const int zLayers = (_zLayersOverride >= 0)
-	                        ? _zLayersOverride
-	                        : computeAutoZLayers(width);
+	const int zLayers = _zLayersOverride > 0 ? _zLayersOverride : computeAutoZLayers(width);
+
+	if (zLayers <= 0) {
+		dp.errorMsg = QStringLiteral("invalid mesh params: zLayers <= 0");
+		emitLogNormal(QStringLiteral("[Mesh][Error] %1 (global=%2 root=%3)")
+		                  .arg(dp.errorMsg)
+		                  .arg(meshSize, 0, 'f', 2)
+		                  .arg(_rootMeshSize, 0, 'f', 2));
+		return false;
+	}
 
 	const bool    useRootRefine = !rootCurveTags.isEmpty();
 	const QString curvesListStr = formatCurveTagList(rootCurveTags);
@@ -918,6 +927,29 @@ bool GearOptCaseRunner::runMeshStep(GearDesignPoint& dp) {
 	                      rootEdgesGear1, rootEdgesGear2, gear1EdgeCount, zCurveTags, zLayers)) {
 		dp.errorMsg = QStringLiteral("runMeshStep: cannot write gear_mesh_debug.geo");
 		return false;
+	}
+
+	emitLogNormal(QStringLiteral("[Mesh][gear.geo] MeshSizeMax=%1 RootSize=%2 TransfiniteLayers=%3 path=%4")
+	                  .arg(meshSize, 0, 'g', 6)
+	                  .arg(_rootMeshSize, 0, 'g', 6)
+	                  .arg(zLayers)
+	                  .arg(geoPath));
+	{
+		QFile geoRead(geoPath);
+		if (geoRead.open(QIODevice::ReadOnly | QIODevice::Text)) {
+			const QString content = QString::fromUtf8(geoRead.readAll());
+			for (const QString& line : content.split(QLatin1Char('\n'))) {
+				const QString t = line.trimmed();
+				if (t.startsWith(QStringLiteral("// zLayers="))
+				    || t.contains(QStringLiteral("Mesh.MeshSizeMax"))
+				    || t.contains(QStringLiteral("Mesh.MeshSizeMin"))
+				    || t.contains(QStringLiteral("Field[2].SizeMin"))
+				    || t.contains(QStringLiteral("Field[2].SizeMax"))
+				    || t.startsWith(QStringLiteral("Transfinite Line"))) {
+					emitLogNormal(QStringLiteral("[Mesh][gear.geo] %1").arg(t));
+				}
+			}
+		}
 	}
 
 	emitLog(QStringLiteral("mesh: gmsh -3 -format inp gear.geo (mesh size %1, debug=%2)")
