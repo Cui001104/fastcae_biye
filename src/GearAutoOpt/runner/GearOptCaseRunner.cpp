@@ -1170,6 +1170,7 @@ bool GearOptCaseRunner::runInpWriteStep(GearDesignPoint& dp) {
 		ctx.useRigidBody   = useRigid;
 		ctx.useCoupling    = !useRigid && _config.solver.useCoupling;
 		ctx.useKinematicCoupling = _config.solver.useKinematicCoupling;
+		ctx.gearDriveMode  = _config.solver.gearDriveMode;
 		ctx.cloads.clear();
 		ctx.contactStiffness    = _config.solver.contactStiffness;
 		ctx.contactPressureP0   = _config.solver.contactPressureP0;

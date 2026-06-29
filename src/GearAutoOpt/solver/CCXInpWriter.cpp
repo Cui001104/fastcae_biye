@@ -85,6 +85,74 @@ static double resolveMentorStep2CloadZ(const DualGearRigidBodySpec& r)
 	return kMentorStep2CloadZ;
 }
 
+enum class GearDriveModeKind { Legacy, Gear1Positive, Gear1Negative };
+
+static GearDriveModeKind parseGearDriveMode(const QString& mode)
+{
+	if (mode == QStringLiteral("gear1_positive"))
+		return GearDriveModeKind::Gear1Positive;
+	if (mode == QStringLiteral("gear1_negative"))
+		return GearDriveModeKind::Gear1Negative;
+	return GearDriveModeKind::Legacy;
+}
+
+static bool releaseStep1DispInStep2(const InpContext& ctx)
+{
+	const GearDriveModeKind kind = parseGearDriveMode(ctx.gearDriveMode);
+	return kind == GearDriveModeKind::Gear1Positive || kind == GearDriveModeKind::Gear1Negative;
+}
+
+static double mentorStep1DispMm(const InpContext& ctx)
+{
+	if (parseGearDriveMode(ctx.gearDriveMode) == GearDriveModeKind::Gear1Negative)
+		return -kMentorStep1RotDispMm;
+	return kMentorStep1RotDispMm;
+}
+
+static double mentorStep2CloadSigned(const InpContext& ctx)
+{
+	const double mag = resolveMentorStep2CloadZ(ctx.rigidBody);
+	if (parseGearDriveMode(ctx.gearDriveMode) == GearDriveModeKind::Gear1Negative)
+		return -mag;
+	return mag;
+}
+
+static int mentorStep2CloadNodeId(const InpContext& ctx)
+{
+	if (releaseStep1DispInStep2(ctx))
+		return ctx.rigidBody.gear1.rotNodeId;
+	return ctx.rigidBody.gear2.rotNodeId;
+}
+
+static QString mentorStep2CloadNodeName(const InpContext& ctx)
+{
+	if (releaseStep1DispInStep2(ctx))
+		return QStringLiteral("CENTER1_ROT");
+	return QStringLiteral("CENTER2_ROT");
+}
+
+static void logGearDriveDebug(const InpContext& ctx)
+{
+	if (!useMentorTwoStepHardContactTemplate(ctx))
+		return;
+
+	const QString mode =
+	    ctx.gearDriveMode.isEmpty() ? QStringLiteral("legacy") : ctx.gearDriveMode;
+	qDebug().noquote()
+	    << QStringLiteral("[Gear][Drive] driveMode=%1").arg(mode);
+	qDebug().noquote()
+	    << QStringLiteral("[Gear][Drive] step1Node=CENTER1_ROT step1Disp=%1")
+	           .arg(mentorStep1DispMm(ctx), 0, 'g', 10);
+	qDebug().noquote()
+	    << QStringLiteral("[Gear][Drive] step2LoadNode=%1 step2Load=%2")
+	           .arg(mentorStep2CloadNodeName(ctx))
+	           .arg(mentorStep2CloadSigned(ctx), 0, 'g', 10);
+	qDebug().noquote()
+	    << QStringLiteral("[Gear][Drive] releaseStep1DispInStep2=%1")
+	           .arg(releaseStep1DispInStep2(ctx) ? QStringLiteral("true")
+	                                             : QStringLiteral("false"));
+}
+
 QString fmtNumber(double v) {
 	return QString::number(v, 'g', 10);
 }
@@ -333,6 +401,7 @@ QString buildContactBlock(const InpContext& ctx) {
 
 QString buildMentorBoundaryStep1(const InpContext& ctx) {
 	const DualGearRigidBodySpec& r = ctx.rigidBody;
+	const double                 step1Disp = mentorStep1DispMm(ctx);
 	return QStringLiteral("*BOUNDARY, OP=NEW\n"
 	                      "%1, 1, 1, 0\n"
 	                      "%1, 2, 2, 0\n"
@@ -348,13 +417,31 @@ QString buildMentorBoundaryStep1(const InpContext& ctx) {
 	                      "%5, 3, 3, 0\n")
 	    .arg(r.gear1.refNodeId)
 	    .arg(r.gear1.rotNodeId)
-	    .arg(fmtNumber(kMentorStep1RotDispMm))
+	    .arg(fmtNumber(step1Disp))
 	    .arg(r.gear2.refNodeId)
 	    .arg(r.gear2.rotNodeId);
 }
 
 QString buildMentorBoundaryStep2(const InpContext& ctx) {
 	const DualGearRigidBodySpec& r = ctx.rigidBody;
+	if (releaseStep1DispInStep2(ctx)) {
+		return QStringLiteral("*BOUNDARY, OP=NEW\n"
+		                      "%1, 1, 1, 0\n"
+		                      "%1, 2, 2, 0\n"
+		                      "%1, 3, 3, 0\n"
+		                      "%2, 1, 1, 0\n"
+		                      "%2, 2, 2, 0\n"
+		                      "%3, 1, 1, 0\n"
+		                      "%3, 2, 2, 0\n"
+		                      "%3, 3, 3, 0\n"
+		                      "%4, 1, 1, 0\n"
+		                      "%4, 2, 2, 0\n")
+		    .arg(r.gear1.refNodeId)
+		    .arg(r.gear1.rotNodeId)
+		    .arg(r.gear2.refNodeId)
+		    .arg(r.gear2.rotNodeId);
+	}
+	const double step1Disp = mentorStep1DispMm(ctx);
 	return QStringLiteral("*BOUNDARY, OP=NEW\n"
 	                      "%1, 1, 1, 0\n"
 	                      "%1, 2, 2, 0\n"
@@ -369,7 +456,7 @@ QString buildMentorBoundaryStep2(const InpContext& ctx) {
 	                      "%5, 2, 2, 0\n")
 	    .arg(r.gear1.refNodeId)
 	    .arg(r.gear1.rotNodeId)
-	    .arg(fmtNumber(kMentorStep1RotDispMm))
+	    .arg(fmtNumber(step1Disp))
 	    .arg(r.gear2.refNodeId)
 	    .arg(r.gear2.rotNodeId);
 }
@@ -399,7 +486,10 @@ QString buildMentorStepOutputBlock(bool step2) {
 
 QString buildMentorTwoStepBlock(const InpContext& ctx) {
 	const DualGearRigidBodySpec& r = ctx.rigidBody;
-	const double step2Cload = resolveMentorStep2CloadZ(r);
+	const double                 step2Cload = mentorStep2CloadSigned(ctx);
+	const int                    step2Node  = mentorStep2CloadNodeId(ctx);
+	const QString                step2NodeName = mentorStep2CloadNodeName(ctx);
+	const bool                   gear1Drive = releaseStep1DispInStep2(ctx);
 
 	QString s;
 	s += QStringLiteral("**\n"
@@ -423,14 +513,26 @@ QString buildMentorTwoStepBlock(const InpContext& ctx) {
 	                    "**\n"
 	                    "*CLOAD, OP=NEW\n");
 	s += buildMentorStepOutputBlock(false);
-	s += QStringLiteral("*END STEP\n"
-	                    "**\n"
-	                    "** Step-2: CENTER2_ROT DOF3 Fz = %1 N (T = %2 N·m, L_rot = %3 mm)\n"
-	                    "**\n"
-	                    "*STEP, NLGEOM, INC=100000\n")
-	           .arg(fmtNumber(step2Cload))
-	           .arg(fmtNumber(r.torqueNmm / 1000.0))
-	           .arg(fmtNumber(kMentorRotOffsetMm));
+	if (gear1Drive) {
+		s += QStringLiteral("*END STEP\n"
+		                    "**\n"
+		                    "** Step-2: %1 DOF3 Fz = %2 N (T = %3 N·m, L_rot = %4 mm)\n"
+		                    "**\n"
+		                    "*STEP, NLGEOM, INC=100000\n")
+		        .arg(step2NodeName)
+		        .arg(fmtNumber(step2Cload))
+		        .arg(fmtNumber(r.torqueNmm / 1000.0))
+		        .arg(fmtNumber(kMentorRotOffsetMm));
+	} else {
+		s += QStringLiteral("*END STEP\n"
+		                    "**\n"
+		                    "** Step-2: CENTER2_ROT DOF3 Fz = %1 N (T = %2 N·m, L_rot = %3 mm)\n"
+		                    "**\n"
+		                    "*STEP, NLGEOM, INC=100000\n")
+		        .arg(fmtNumber(step2Cload))
+		        .arg(fmtNumber(r.torqueNmm / 1000.0))
+		        .arg(fmtNumber(kMentorRotOffsetMm));
+	}
 	s += QStringLiteral(
 	                    "*STATIC\n"
 	                    "%1, %2, %3, %4\n"
@@ -445,7 +547,7 @@ QString buildMentorTwoStepBlock(const InpContext& ctx) {
 	                    "**\n"
 	                    "*CLOAD, OP=NEW\n"
 	                    "%1, 3, %2\n")
-	           .arg(r.gear2.rotNodeId)
+	           .arg(step2Node)
 	           .arg(fmtNumber(step2Cload));
 	s += buildMentorStepOutputBlock(true);
 	s += QStringLiteral("*END STEP\n");
@@ -1049,6 +1151,7 @@ bool writeJobInp(const QString& dir, const InpContext& ctxIn) {
 	const QString meshPath = d.filePath(ctx.meshInpFile);
 	if (ctx.twoGearJob)
 		ctx.gearVolumeNsetBlock = buildGearVolumeNsetsBlock(meshPath);
+	logGearDriveDebug(ctx);
 	logCcxInpWriteSummary(ctx, meshPath);
 
 	const QByteArray body = renderJobInp(ctx).toUtf8();

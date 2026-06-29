@@ -90,6 +90,8 @@ struct GEARAUTOOPTAPI SolverParams {
 	bool    surrogateAssisted  = false;
 	/// false = Normal 日志；true = Debug（网格/CCX 识别细节 + qDebug）。
 	bool    debugMode          = false;
+	/// 双齿轮 mentor 加载调试：legacy | gear1_positive | gear1_negative
+	QString gearDriveMode      = QStringLiteral("legacy");
 };
 
 /// 设计变量是否参与 NSGA-II（未勾选则 bounds 固定为基准值）。

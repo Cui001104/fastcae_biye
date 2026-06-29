@@ -292,6 +292,9 @@ struct GEARAUTOOPTAPI InpContext {
 	/// 双齿轮：由 writeJobInp 从 mesh ELSET 生成 *NSET=GEAR1_NODES/GEAR2_NODES（与 ELSET 区分）。
 	QString gearVolumeNsetBlock;
 
+	/// legacy | gear1_positive | gear1_negative（18/26 加载方向调试）
+	QString gearDriveMode = QStringLiteral("legacy");
+
 };
 
 

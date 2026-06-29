@@ -646,14 +646,18 @@ namespace Command {
 
 		double rotationAngle = halfTooth + invDiff;
 
-		qDebug() << "[Gear][Phase] z1 =" << z1
-		         << "z2 =" << z2
-		         << "gear1ToothOnMeshLine =" << gear1ToothOnMeshLine
-		         << "gear2ToothOnMeshLine =" << gear2ToothOnMeshLine
-		         << "needHalfToothShift =" << needHalfToothShift
-		         << "halfToothDeg =" << halfTooth * 180.0 / M_PI
-		         << "invDiffDeg =" << invDiff * 180.0 / M_PI
-		         << "rotationAngleDeg =" << rotationAngle * 180.0 / M_PI;
+		qDebug().noquote() << QStringLiteral("[Gear][Phase] z1=%1 z2=%2").arg(z1).arg(z2);
+		qDebug().noquote() << QStringLiteral("[Gear][Phase] gear1ToothOnMeshLine=%1 gear2ToothOnMeshLine=%2")
+		                              .arg(gear1ToothOnMeshLine ? 1 : 0)
+		                              .arg(gear2ToothOnMeshLine ? 1 : 0);
+		qDebug().noquote() << QStringLiteral("[Gear][Phase] needHalfToothShift=%1")
+		                              .arg(needHalfToothShift ? 1 : 0);
+		qDebug().noquote() << QStringLiteral("[Gear][Phase] halfToothDeg=%1")
+		                              .arg(halfTooth * 180.0 / M_PI, 0, 'g', 10);
+		qDebug().noquote() << QStringLiteral("[Gear][Phase] invDiffDeg=%1")
+		                              .arg(invDiff * 180.0 / M_PI, 0, 'g', 10);
+		qDebug().noquote() << QStringLiteral("[Gear][Phase] rotationAngleDeg=%1")
+		                              .arg(rotationAngle * 180.0 / M_PI, 0, 'g', 10);
 
 		if (std::abs(rotationAngle) > 1e-6) {
 			gp_Trsf rotateTransform;
