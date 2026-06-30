@@ -401,6 +401,7 @@ QJsonObject GearOptConfig::toJson() const
 	solverJson["parallel_ccx_enabled"]  = solver.parallelCcxEnabled;
 	solverJson["parallel_ccx_jobs"]     = solver.parallelCcxJobs;
 	solverJson["ccx_threads_per_job"]   = solver.ccxThreadsPerJob;
+	solverJson["gear_drive_mode"]       = solver.gearDriveMode;
 	root["solver"]                   = solverJson;
 
 	QJsonObject dvJson;
@@ -506,6 +507,8 @@ GearOptConfig GearOptConfig::fromJson(const QJsonObject& root)
 	c.solver.parallelCcxEnabled = sv.value("parallel_ccx_enabled").toBool(false);
 	c.solver.parallelCcxJobs    = sv.value("parallel_ccx_jobs").toInt(2);
 	c.solver.ccxThreadsPerJob   = sv.value("ccx_threads_per_job").toInt(4);
+	if (sv.contains("gear_drive_mode"))
+		c.solver.gearDriveMode = sv.value("gear_drive_mode").toString(QStringLiteral("legacy"));
 
 	if (root.contains("design_vars") && root.value("design_vars").isObject()) {
 		const QJsonObject dvo = root.value("design_vars").toObject();

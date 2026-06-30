@@ -2291,11 +2291,29 @@ bool enrichGearMeshInp(const QString& meshInpPath,
 	                              .arg(local.gear2ToothRangeText);
 	const int masterFaces = countSurfaceFaces(meshInpPath, QStringLiteral("master"));
 	const int slaveFaces  = countSurfaceFaces(meshInpPath, QStringLiteral("slave"));
-	GEAR_OPT_DEBUG_NOQUOTE << QStringLiteral("[GearOpt][Mesh] contact surface names: slave, master");
-	GEAR_OPT_DEBUG_NOQUOTE << QStringLiteral("[GearOpt][Mesh] master face count = %1  slave face count = %2")
-	                              .arg(masterFaces)
-	                              .arg(slaveFaces);
-	GEAR_OPT_DEBUG_NOQUOTE << QStringLiteral("[GearOpt][Mesh] local contact teeth: center ±3, full 7 teeth");
+
+	const double angle1Deg = angle1 * 180.0 / M_PI;
+	const double angle2Deg = angle2 * 180.0 / M_PI;
+	const int    halfSpan  = 3;
+	qDebug().noquote()
+	    << QStringLiteral("[Gear][ContactPick] gear1Center=%1 gear2Center=%2")
+	           .arg(local.gear1CenterToothIndex)
+	           .arg(local.gear2CenterToothIndex);
+	qDebug().noquote()
+	    << QStringLiteral("[Gear][ContactPick] gear1TargetAngleDeg=%1 gear2TargetAngleDeg=%2")
+	           .arg(angle1Deg, 0, 'g', 10)
+	           .arg(angle2Deg, 0, 'g', 10);
+	qDebug().noquote() << QStringLiteral("[Gear][ContactPick] contactToothHalfSpan=%1").arg(halfSpan);
+	qDebug().noquote()
+	    << QStringLiteral("[Gear][ContactPick] gear1Window=%1").arg(local.gear1ToothRangeText);
+	qDebug().noquote()
+	    << QStringLiteral("[Gear][ContactPick] gear2Window=%1").arg(local.gear2ToothRangeText);
+	qDebug().noquote()
+	    << QStringLiteral("[Gear][ContactPick] GEAR1_TOOTH_SURF faces=%1").arg(local.gear1ToothSurfCount);
+	qDebug().noquote()
+	    << QStringLiteral("[Gear][ContactPick] GEAR2_TOOTH_SURF faces=%1").arg(local.gear2ToothSurfCount);
+	qDebug().noquote() << QStringLiteral("[Gear][ContactPick] slave faces=%1").arg(slaveFaces);
+	qDebug().noquote() << QStringLiteral("[Gear][ContactPick] master faces=%1").arg(masterFaces);
 
 	if (report)
 		*report = local;

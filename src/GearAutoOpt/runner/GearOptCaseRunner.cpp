@@ -944,8 +944,7 @@ bool GearOptCaseRunner::runMeshStep(GearDesignPoint& dp) {
 				    || t.contains(QStringLiteral("Mesh.MeshSizeMax"))
 				    || t.contains(QStringLiteral("Mesh.MeshSizeMin"))
 				    || t.contains(QStringLiteral("Field[2].SizeMin"))
-				    || t.contains(QStringLiteral("Field[2].SizeMax"))
-				    || t.startsWith(QStringLiteral("Transfinite Line"))) {
+				    || t.contains(QStringLiteral("Field[2].SizeMax"))) {
 					emitLogNormal(QStringLiteral("[Mesh][gear.geo] %1").arg(t));
 				}
 			}
@@ -1202,6 +1201,7 @@ bool GearOptCaseRunner::runInpWriteStep(GearDesignPoint& dp) {
 		ctx.useRigidBody   = useRigid;
 		ctx.useCoupling    = !useRigid && _config.solver.useCoupling;
 		ctx.useKinematicCoupling = _config.solver.useKinematicCoupling;
+		ctx.gearDriveMode  = _config.solver.gearDriveMode;
 		ctx.cloads.clear();
 		ctx.contactStiffness    = _config.solver.contactStiffness;
 		ctx.contactPressureP0   = _config.solver.contactPressureP0;

@@ -92,9 +92,12 @@ static QVector<SurrogateSample> loadMergedValidatedSamples(const QString& baseCa
         for (const SurrogateSample& s : db.loadValidatedSamples(baseCaseH, fixedWidthMm, 0, dbStats)) {
             if (!isValidSurrogateTrainingSample(s, cfg))
                 continue;
-            const QString key = s.designHash.isEmpty()
-                                    ? QStringLiteral("idx_%1").arg(uniq.size())
-                                    : s.designHash;
+            // 以 case_hash 为主键合并，避免同 design_hash 的不同 CCX 结果被覆盖导致样本数不增长。
+            const QString key = !s.caseHash.isEmpty()
+                                    ? s.caseHash
+                                    : (!s.designHash.isEmpty()
+                                           ? s.designHash
+                                           : QStringLiteral("idx_%1").arg(uniq.size()));
             uniq.insert(key, s);
         }
     };
@@ -106,6 +109,45 @@ static QVector<SurrogateSample> loadMergedValidatedSamples(const QString& baseCa
         mergedStats->failedSkipped = std::max(0, mergedStats->totalSamples - mergedStats->validSamples);
     }
     return uniq.values().toVector();
+}
+
+static QList<GearDesignPoint> designPointsFromValidatedSamples(
+    const QVector<SurrogateSample>& samples,
+    const GearDesignPoint& baseDp,
+    const GearOptConfig& cfg,
+    double fixedWidthMm)
+{
+    QList<GearDesignPoint> out;
+    out.reserve(samples.size());
+    int idx = 0;
+    for (const SurrogateSample& s : samples) {
+        if (!isValidSurrogateTrainingSample(s, cfg))
+            continue;
+        GearDesignPoint dp = baseDp;
+        if (!s.x.isEmpty())
+            applySurrogateInputVars(dp, s.x);
+        dp.commonWidth     = fixedWidthMm;
+        dp.cpressMax_MPa   = s.cpressMax;
+        dp.edgeLoadRatio   = s.edgeLoadRatio;
+        dp.cpressCV        = s.cpressCV;
+        dp.sigmaMax        = s.sigmaMax;
+        dp.uMax            = s.uMax;
+        dp.mass            = s.mass;
+        dp.status          = PointStatus::Done;
+        dp.generation      = 0;
+        dp.id              = idx++;
+        out.append(dp);
+    }
+    return out;
+}
+
+static void refreshSurrogateValidatedCache(QList<GearDesignPoint>& cache,
+                                           const QVector<SurrogateSample>& samples,
+                                           const GearDesignPoint& baseDp,
+                                           const GearOptConfig& cfg,
+                                           double fixedWidthMm)
+{
+    cache = designPointsFromValidatedSamples(samples, baseDp, cfg, fixedWidthMm);
 }
 
 static void fixPopulationCommonWidth(Population& pop, double widthMm)
@@ -180,6 +222,28 @@ static bool dominatesByObjectives(const GearDesignPoint& a,
     consider(useDefault || obj.minSigmaMax, a.sigmaMax, b.sigmaMax);
     consider(!useDefault && obj.minMass, a.mass, b.mass);
     return allLe && anyStrict;
+}
+
+static QList<GearDesignPoint> paretoFrontFromDesignPoints(const QList<GearDesignPoint>& all,
+                                                          const Objectives& obj)
+{
+    QList<GearDesignPoint> pareto;
+    for (const GearDesignPoint& a : all) {
+        if (a.status != PointStatus::Done || a.cpressMax_MPa <= 0.0)
+            continue;
+        if (obj.minSigmaMax && a.sigmaMax <= 0.0)
+            continue;
+        bool dominated = false;
+        for (const GearDesignPoint& b : all) {
+            if (dominatesByObjectives(a, b, obj)) {
+                dominated = true;
+                break;
+            }
+        }
+        if (!dominated)
+            pareto.append(a);
+    }
+    return pareto;
 }
 
 static void logEnabledObjectives(const GearOptConfig& cfg,
@@ -343,6 +407,9 @@ void GearAutoOptManager::openResultDatabases()
 }
 
 QList<GearDesignPoint> GearAutoOptManager::paretoFront() const {
+    if (!_surrogateValidatedPoints.isEmpty())
+        return paretoFrontFromDesignPoints(_surrogateValidatedPoints, _cfg.objectives);
+
     QList<GearDesignPoint> all;
     for (const auto& gen : _allPoints)
         for (const auto& dp : gen) {
@@ -815,6 +882,11 @@ void GearAutoOptManager::evaluateInfillByCcxParallel(
     const QString       runIdCopyCcx   = runIdCopy;
     const GearLogLevel  logLevelCopyCcx = logLevelCopy;
 
+    if (!ccxQueue.isEmpty()) {
+        emit log(QStringLiteral("[Parallel] Submit %1 CCX jobs...")
+                     .arg(ccxQueue.size()));
+    }
+
     int batchNum = 0;
     for (int batchStart = 0; batchStart < ccxQueue.size() && !_stopRequested; batchStart += jobs) {
         const int batchEnd = std::min(batchStart + jobs, static_cast<int>(ccxQueue.size()));
@@ -1195,6 +1267,7 @@ void GearAutoOptManager::startSurrogateAssisted()
     connectMainThreadRunnerLogs(this);
     _stopRequested = false;
     _allPoints.clear();
+    _surrogateValidatedPoints.clear();
     logSurrogateFixedObjectives([this](const QString& msg) { emit log(msg); });
     _surrogateThresholdLogged = false;
     _runId = GearOptResultDatabase::generateRunId(_cfg.nsga2.randomSeed);
@@ -1254,7 +1327,11 @@ void GearAutoOptManager::startSurrogateAssisted()
                  .arg(sampleStats.failedSkipped)
                  .arg(_fixedCommonWidthMm, 0, 'g', 6));
 
-    auto supplementValidatedSamples = [&](int generationBase) -> bool {
+    const int initialExisting = samples.size();
+    emit log(QStringLiteral("[Surrogate] Existing samples : %1").arg(initialExisting));
+    emit log(QStringLiteral("[Surrogate] Minimum samples : %1").arg(minSamples));
+
+    auto supplementValidatedSamples = [&](int generationBase, bool logAsInitial) -> bool {
         constexpr int kMaxAttempts = 20;
         constexpr int kMaxStagnantAttempts = 6;
         int stagnantAttempts = 0;
@@ -1264,23 +1341,27 @@ void GearAutoOptManager::startSurrogateAssisted()
              ++attempt) {
             const int before = samples.size();
             const int need = minSamples - before;
-            const int batchN = std::max(
-                need, std::min(std::max(1, N), std::max(3, need * 2)));
+            const int batchN = std::max(1, need);
             const int seed = _cfg.nsga2.randomSeed
                              + generationBase * 1009
                              + attempt * 7919;
 
-            emit log(QStringLiteral("[GearOpt][Surrogate] LHS supplement attempt=%1: samples=%2/%3, request=%4")
-                         .arg(attempt)
-                         .arg(before)
-                         .arg(minSamples)
-                         .arg(batchN));
+            if (logAsInitial && attempt == 1) {
+                emit log(QStringLiteral("[Surrogate] Initial LHS required : %1").arg(need));
+                emit log(QStringLiteral("[Surrogate] Generating initial samples..."));
+            } else {
+                emit log(QStringLiteral("[GearOpt][Surrogate] LHS supplement attempt=%1: samples=%2/%3, request=%4")
+                             .arg(attempt)
+                             .arg(before)
+                             .arg(minSamples)
+                             .arg(batchN));
+            }
 
             _population = initLatin(batchN, _cfg, seed);
             fixPopulationCommonWidth(_population, _fixedCommonWidthMm);
 
             CcxEvalSummary supplementStats;
-            evaluatePopulationByCcx(_population, generationBase + attempt, &supplementStats);
+            evaluateInfillByCcx(_population, generationBase + attempt, &supplementStats);
             if (_stopRequested)
                 return false;
 
@@ -1306,14 +1387,15 @@ void GearAutoOptManager::startSurrogateAssisted()
             }
         }
 
+        if (logAsInitial && samples.size() >= minSamples && !_stopRequested) {
+            emit log(QStringLiteral("[Parallel] All initial samples finished."));
+        }
+
         return samples.size() >= minSamples;
     };
 
     if (samples.size() < minSamples) {
-        emit log(QStringLiteral("[GearOpt][Surrogate] samples %1 < %2, LHS+CCX will supplement until RBF minimum is satisfied")
-                     .arg(samples.size())
-                     .arg(minSamples));
-        if (!supplementValidatedSamples(0)) {
+        if (!supplementValidatedSamples(0, true)) {
             GearOptResultDatabase::runSession().closeDatabase();
             emit finished(false);
             return;
@@ -1328,13 +1410,25 @@ void GearAutoOptManager::startSurrogateAssisted()
         }
     }
 
+    emit log(QStringLiteral("[Surrogate] Training surrogate..."));
+
     for (int round = 1; round <= std::max(1, Gmax) && !_stopRequested; ++round) {
+        const int samplesBeforeReload = samples.size();
+        samples = loadMergedValidatedSamples(baseCaseH, _fixedCommonWidthMm, _cfg, &sampleStats);
+        refreshSurrogateValidatedCache(_surrogateValidatedPoints, samples, baseDp, _cfg,
+                                       _fixedCommonWidthMm);
+        emit log(QStringLiteral("[Surrogate] round %1: reloaded %2 CCX-validated samples from DB (delta=%3, failed_skipped=%4)")
+                     .arg(round)
+                     .arg(samples.size())
+                     .arg(samples.size() - samplesBeforeReload)
+                     .arg(sampleStats.failedSkipped));
+
         if (samples.size() < minSamples) {
             emit log(QStringLiteral("[GearOpt][Surrogate] round %1 skipped training: samples=%2 < minSamplesForRBF=%3")
                          .arg(round)
                          .arg(samples.size())
                          .arg(minSamples));
-            if (!supplementValidatedSamples(round * 1000)) {
+            if (!supplementValidatedSamples(round * 1000, false)) {
                 emit log(QStringLiteral("[GearOpt][Surrogate] round %1 terminated before RBF training due to insufficient validated samples")
                              .arg(round));
                 break;
@@ -1373,7 +1467,9 @@ void GearAutoOptManager::startSurrogateAssisted()
                          .arg(looCpress >= 0.0 ? looCpress * 100.0 : -1.0, 0, 'g', 4));
             if (looEdge >= 0.10) {
                 emit log(QStringLiteral(
-                    "[Surrogate] warning: edgeLoadRatio surrogate error is high; final ranking requires CCX validation."));
+                    "[Surrogate] warning: edgeLoadRatio surrogate LOO error is high (~%1%); "
+                    "edgeLoadRatio is reference-only — final ranking / Pareto / export use CCX true values.")
+                         .arg(looEdge >= 0.0 ? looEdge * 100.0 : -1.0, 0, 'g', 4));
             }
         }
 
@@ -1383,7 +1479,8 @@ void GearAutoOptManager::startSurrogateAssisted()
         infillScoring.alpha = 0.6;
         infillScoring.beta = 0.4;
         infillScoring.neighborK = 3;
-        infillScoring.minDesignDistNorm = 1e-4;
+        infillScoring.minDesignDistNorm = 0.03;
+        infillScoring.logFn = [this](const QString& msg) { emit log(msg); };
 
         std::mt19937 rng(static_cast<unsigned>(_cfg.nsga2.randomSeed + round));
         Population surrogatePop = initLatin(N, _cfg, _cfg.nsga2.randomSeed + round);
@@ -1643,6 +1740,11 @@ void GearAutoOptManager::startSurrogateAssisted()
                          .arg(dp.edgeLoadRatio, 0, 'g', 8)
                          .arg(row.cpressErrorPercent >= 0.0 ? row.cpressErrorPercent : -1.0, 0, 'g', 6)
                          .arg(row.edgeLoadRatioErrorPercent >= 0.0 ? row.edgeLoadRatioErrorPercent : -1.0, 0, 'g', 6));
+            if (edgeErr >= 0.30) {
+                emit log(QStringLiteral(
+                    "[Surrogate] warning: edgeLoadRatio CCX validation error=%1% — ranking uses true CCX edgeLoadRatio only.")
+                             .arg(edgeErr * 100.0, 0, 'g', 4));
+            }
 
             if (!cached) {
                 predCpressNew.append(predCpress[pointIndex]);
@@ -1669,10 +1771,13 @@ void GearAutoOptManager::startSurrogateAssisted()
         const double rmaeU         = computeRmae(predUAll, trueUAll);
 
         samples = loadMergedValidatedSamples(baseCaseH, _fixedCommonWidthMm, _cfg, &sampleStats);
+        refreshSurrogateValidatedCache(_surrogateValidatedPoints, samples, baseDp, _cfg,
+                                       _fixedCommonWidthMm);
         logBestRealSoFar(samples, round, _cfg, [this](const QString& msg) { emit log(msg); });
 
         const Population ccxPop = populationFromValidatedSamples(samples, _cfg);
         const Population ccxPareto = extractPareto(ccxPop);
+        const int ccxParetoSize = ccxPareto.size();
         const auto ccxParetoMax = paretoObjectiveMax(ccxPareto);
         const HypervolumeReference2D ccxHvRef = computeDynamicHypervolumeReference(
             samples, ccxParetoMax.first, ccxParetoMax.second, kHvRefMargin,
@@ -1729,13 +1834,14 @@ void GearAutoOptManager::startSurrogateAssisted()
                      .arg(fmtRmaePct(rmaeCpressNew))
                      .arg(fmtRmaePct(rmaeSigma))
                      .arg(fmtRmaePct(rmaeSigmaNew)));
-        emit log(QStringLiteral("[Surrogate] HV round=%1 PredHV=%2 PredPareto=%3 ref_cpress=%4 ref_edge=%5 | CCXSamples=%6 CCXHV=%7")
+        emit log(QStringLiteral("[Surrogate] HV round=%1 PredHV=%2 PredPareto=%3 ref_cpress=%4 ref_edge=%5 | CCXSamples=%6 CCXPareto=%7 CCXHV=%8 (authoritative)")
                      .arg(round)
                      .arg(predHv, 0, 'g', 4)
                      .arg(predParetoSize)
                      .arg(predHvRef.refCpressMax, 0, 'g', 6)
                      .arg(predHvRef.refEdgeLoadRatio, 0, 'g', 6)
                      .arg(ccxSampleCount)
+                     .arg(ccxParetoSize)
                      .arg(ccxHv, 0, 'g', 4));
 
         if (ccxStats.newCcxCount > 0 && rmaeCpressNew >= 0.0 && rmaeSigmaNew >= 0.0
@@ -1744,11 +1850,18 @@ void GearAutoOptManager::startSurrogateAssisted()
             break;
         }
 
-        emit generationFinished(round, predParetoSize, predHv);
+        emit generationFinished(round, ccxParetoSize, ccxHv);
     }
+
+    _allPoints.clear();
+    if (!_surrogateValidatedPoints.isEmpty())
+        _allPoints.append(_surrogateValidatedPoints);
 
     syncFinalParetoToDatabase();
     GearOptResultDatabase::runSession().closeDatabase();
+    emit log(QStringLiteral("[Surrogate] final export/compare uses %1 CCX-validated samples, Pareto=%2 (true CCX objectives)")
+                 .arg(_surrogateValidatedPoints.size())
+                 .arg(paretoFront().size()));
     emit log(QStringLiteral("primary_objective = cpressMax_MPa"));
     emit log(QStringLiteral("secondary_objective = edgeLoadRatio"));
     emit log(QStringLiteral("recorded_metrics = sigmaMax_MPa, uMax_mm, mass_kg, cpressCV"));

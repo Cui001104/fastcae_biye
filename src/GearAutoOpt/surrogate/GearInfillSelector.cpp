@@ -179,6 +179,13 @@ Population selectImpl(const Population& surrogatePareto,
 	if (k <= 0 || surrogatePareto.isEmpty())
 		return {};
 
+	const auto logMsg = [&](const QString& msg) {
+		if (scoring.logFn)
+			scoring.logFn(msg);
+		else
+			qDebug().noquote() << msg;
+	};
+
 	QVector<QVector<double>> existingNorm;
 	QVector<double> residualNormAll = normalizedResiduals(sampleResiduals);
 	QVector<double> existingResidualNorm;
@@ -212,32 +219,28 @@ Population selectImpl(const Population& surrogatePareto,
 		const QVector<double> xNorm = normalizeByBounds(surrogateInputVars(dp), lo, hi);
 		const double distExisting = minNormalizedDistanceTo(xNorm, existingNorm);
 		if (!existingNorm.isEmpty() && distExisting < minDesignDist) {
-			qDebug().noquote()
-			    << QStringLiteral("[Infill] skip near-duplicate design vars minDist=%1 <%2 | %3")
+			logMsg(QStringLiteral("[Infill] skip near-duplicate design vars minDist=%1 < %2 | %3")
 			           .arg(distExisting, 0, 'g', 6)
 			           .arg(minDesignDist, 0, 'g', 6)
-			           .arg(formatDesignVarsLine(dp));
+			           .arg(formatDesignVarsLine(dp)));
 			continue;
 		}
 
 		if (cfg && basePoint) {
 			const QString caseH = GearOptResultDatabase::caseHash(dp);
 			if (failedCaseHashes.contains(caseH)) {
-				qDebug().noquote()
-				    << QStringLiteral("[Infill] skip failed case_hash=%1").arg(caseH);
+				logMsg(QStringLiteral("[Infill] skip failed case_hash=%1").arg(caseH));
 				continue;
 			}
 			if (knownCaseHashes.contains(caseH)) {
-				qDebug().noquote()
-				    << QStringLiteral("[Infill] skip existing cache: %1 | %2")
-				           .arg(caseH, formatDesignVarsLine(dp));
+				logMsg(QStringLiteral("[Infill] skip existing cache: %1 | %2")
+				           .arg(caseH, formatDesignVarsLine(dp)));
 				continue;
 			}
 			const QString designH = GearOptResultDatabase::designHash(dp);
 			if (knownDesignHashes.contains(designH)) {
-				qDebug().noquote()
-				    << QStringLiteral("[Infill] skip existing design_hash: %1 | %2")
-				           .arg(designH, formatDesignVarsLine(dp));
+				logMsg(QStringLiteral("[Infill] skip existing design_hash: %1 | %2")
+				           .arg(designH, formatDesignVarsLine(dp)));
 				continue;
 			}
 		}
@@ -323,11 +326,10 @@ Population selectImpl(const Population& surrogatePareto,
 			    std::min(minDistToRealOrSelected, normalizedSpaceDistance(candNorm, sel));
 		}
 		if (minDistToRealOrSelected < minDesignDist) {
-			qDebug().noquote()
-			    << QStringLiteral("[Infill] skip near-duplicate minDist=%1 <%2 | %3")
+			logMsg(QStringLiteral("[Infill] skip near-duplicate minDist=%1 < %2 | %3")
 			           .arg(minDistToRealOrSelected, 0, 'g', 6)
 			           .arg(minDesignDist, 0, 'g', 6)
-			           .arg(formatDesignVarsLine(candDp));
+			           .arg(formatDesignVarsLine(candDp)));
 			continue;
 		}
 
@@ -335,14 +337,12 @@ Population selectImpl(const Population& surrogatePareto,
 			const GearDesignPoint dp = candDp;
 			const QString caseH = GearOptResultDatabase::caseHash(dp);
 			if (failedCaseHashes.contains(caseH)) {
-				qDebug().noquote()
-				    << QStringLiteral("[Infill] skip failed case_hash=%1").arg(caseH);
+				logMsg(QStringLiteral("[Infill] skip failed case_hash=%1").arg(caseH));
 				continue;
 			}
 			if (selectedCaseHashes.contains(caseH)) {
-				qDebug().noquote()
-				    << QStringLiteral("[Infill] skip duplicate in this round: %1 | %2")
-				           .arg(caseH, formatDesignVarsLine(dp));
+				logMsg(QStringLiteral("[Infill] skip duplicate in this round: %1 | %2")
+				           .arg(caseH, formatDesignVarsLine(dp)));
 				continue;
 			}
 			selectedCaseHashes.insert(caseH);
@@ -350,8 +350,7 @@ Population selectImpl(const Population& surrogatePareto,
 
 		selectedNorm.append(candNorm);
 		out.append(si.ind);
-		qDebug().noquote()
-		    << QStringLiteral(
+		logMsg(QStringLiteral(
 		           "[Infill] selected rank=%1 case_hash=%2 minDistNorm=%3 localResidualNorm=%4 "
 		           "score=%5 k=%6 alpha=%7 beta=%8 | %9")
 		           .arg(si.ind.rank)
@@ -362,13 +361,13 @@ Population selectImpl(const Population& surrogatePareto,
 		           .arg(si.neighborCount)
 		           .arg(si.alphaUsed, 0, 'g', 6)
 		           .arg(si.betaUsed, 0, 'g', 6)
-		           .arg(formatDesignVarsLine(candDp));
+		           .arg(formatDesignVarsLine(candDp)));
 	}
 
 	if (out.size() < k) {
-		qDebug().noquote() << QStringLiteral("[Infill] warning: requested %1 points, selected %2")
+		logMsg(QStringLiteral("[Infill] warning: requested %1 points, selected %2")
 		                          .arg(k)
-		                          .arg(out.size());
+		                          .arg(out.size()));
 	}
 
 	return out;

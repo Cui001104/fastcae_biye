@@ -8,6 +8,7 @@
 #include "GearAutoOpt/surrogate/GearSurrogateModel.h"
 
 #include <QSet>
+#include <functional>
 
 namespace GearAutoOpt {
 
@@ -16,7 +17,9 @@ struct GEARAUTOOPTAPI InfillScoringConfig {
 	double beta = 0.4;
 	int    neighborK = 3;
 	/// 归一化设计空间最小距离；低于此值视为重复 infill 并跳过。
-	double minDesignDistNorm = 1e-4;
+	double minDesignDistNorm = 0.03;
+	/// 可选：将 skip/selected 日志转发到 UI（未设置时写 qDebug）。
+	std::function<void(const QString&)> logFn;
 };
 
 class GEARAUTOOPTAPI GearInfillSelector {

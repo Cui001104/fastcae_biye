@@ -317,14 +317,13 @@ void GearOptDialog::buildUi() {
 
     _chkSurrogateAssisted = new QCheckBox(QString::fromUtf8("启用代理辅助优化"), this);
     _chkSurrogateAssisted->setToolTip(
-        QString::fromUtf8("仅使用同一基准工况（m/z/压力角/固定齿宽/扭矩/网格/接触/材料）"
-                         "且经 CCX 验证的历史样本训练 7 维 RBF；"
-                         "样本不足时先 LHS+CCX 补样。"));
+        QString::fromUtf8("一键式代理优化：自动检查同 baseCaseHash 的 CCX 样本，"
+                         "不足时自动 LHS 补样并并行 CCX，随后 RBF 训练、代理 NSGA-II 与 Infill 验证。"));
     solverLayout->addWidget(_chkSurrogateAssisted);
     solverLayout->addStretch();
     mainLayout->addWidget(solverGroup);
 
-    auto* parallelGroup = new QGroupBox(QString::fromUtf8("并行 CCX 验证（infill 阶段）"), this);
+    auto* parallelGroup = new QGroupBox(QString::fromUtf8("并行 CCX（初始 LHS + Infill）"), this);
     auto* parallelLayout = new QHBoxLayout(parallelGroup);
     parallelLayout->setContentsMargins(10, 12, 10, 10);
     parallelLayout->setSpacing(8);
@@ -332,8 +331,8 @@ void GearOptDialog::buildUi() {
     _chkParallelCcx = new QCheckBox(QString::fromUtf8("启用并行 CCX 验证"), this);
     _chkParallelCcx->setChecked(false);
     _chkParallelCcx->setToolTip(
-        QString::fromUtf8("仅作用于代理辅助优化中的 infill 有限元验证阶段；"
-                         "初始样本、NSGA-II、RBF 训练不受影响。"));
+        QString::fromUtf8("作用于代理辅助优化中的 CCX 求解："
+                         "初始 LHS 补样与 Infill 验证均先完成 CAD/网格，再并行提交 CCX。"));
     parallelLayout->addWidget(_chkParallelCcx);
 
     parallelLayout->addSpacing(12);
@@ -614,11 +613,32 @@ void GearOptDialog::onStart() {
                                                "跨次累积的总库位于程序目录（Debug 输出目录）。"));
         return;
     }
+
+    auto& globalDb = GearOptResultDatabase::global();
+    if (!globalDb.isOpen()) {
+        globalDb.openDatabase(GearOptResultDatabase::defaultGlobalDatabasePath());
+    }
+
     _maxGen      = cfg.nsga2.maxGenerations;
     if (cfg.solver.surrogateAssisted) {
         const int minSamples = minSurrogateSampleCount(cfg.nsga2.populationSize);
         const int infillPerRound = std::min(5, std::max(3, std::max(1, cfg.nsga2.populationSize / 10)));
-        _totalPoints = minSamples + _maxGen * infillPerRound;
+        int initialNeeded = minSamples;
+        if (globalDb.isOpen()) {
+            GearDesignPoint baseDp;
+            if (Geometry::GeometryParaGear* g = findCurrentGeometryParaGear()) {
+                baseDp = gearDesignPointFromGeometryParaGear(*g);
+                baseDp.applyRunSimDefaults(cfg, cfg.solver.meshSize, cfg.solver.meshSize <= 0.0);
+            } else {
+                baseDp = cfg.useOptimizationBase ? cfg.optimizationBase : GearDesignPoint();
+                baseDp.applyRunSimDefaults(cfg, cfg.solver.meshSize, cfg.solver.meshSize <= 0.0);
+            }
+            const QString baseCaseH = GearOptResultDatabase::baseCaseHash(baseDp);
+            const int existing =
+                globalDb.countValidatedSamplesForBaseCase(baseCaseH, baseDp.commonWidth);
+            initialNeeded = std::max(0, minSamples - existing);
+        }
+        _totalPoints = initialNeeded + _maxGen * infillPerRound;
     } else {
         _totalPoints = cfg.nsga2.populationSize * (_maxGen + 1);
     }
@@ -634,10 +654,6 @@ void GearOptDialog::onStart() {
     _lastRunCfg = cfg;
     _lastRunDir = runDir;
 
-    auto& globalDb = GearOptResultDatabase::global();
-    if (!globalDb.isOpen()) {
-        globalDb.openDatabase(GearOptResultDatabase::defaultGlobalDatabasePath());
-    }
     _log->append(QStringLiteral("[GearOpt][DB] 总库: %1（样本 %2）")
                      .arg(globalDb.isOpen() ? globalDb.databasePath()
                                             : GearOptResultDatabase::defaultGlobalDatabasePath())
@@ -645,7 +661,7 @@ void GearOptDialog::onStart() {
     _log->append(QStringLiteral("[GearOpt][DB] 本次运行库: %1")
                      .arg(GearOptResultDatabase::databasePathInRunDir(runDir)));
     if (cfg.solver.surrogateAssisted) {
-        _log->append(QStringLiteral("[GearOpt] 模式: 代理辅助优化（同 baseCaseHash 的 CCX 样本训练 RBF）"));
+        _log->append(QStringLiteral("[GearOpt] 模式: 一键式代理辅助优化（自动 LHS 补样 → RBF → Infill）"));
     } else {
         _log->append(QStringLiteral("[GearOpt] 模式: 全 CCX 优化"));
     }
@@ -874,10 +890,10 @@ void GearOptDialog::onGenerationFinished(int gen, int paretoSize, double hv) {
 	if (_ignoreManagerSlots)
 		return;
 	if (_labelStatus)
-		_labelStatus->setText(QString("Gen %1/%2 | Pareto: %3 | HV: %4")
+		_labelStatus->setText(QString("Gen %1/%2 | CCX Pareto: %3 | CCX HV: %4")
 		                      .arg(gen).arg(_maxGen).arg(paretoSize).arg(hv, 0, 'g', 4));
 	if (_log)
-		_log->append(QString("[gen%1] Pareto=%2 HV=%3")
+		_log->append(QString("[gen%1] CCX Pareto=%2 CCX HV=%3 (authoritative)")
 		             .arg(gen).arg(paretoSize).arg(hv, 0, 'g', 5));
 }
 

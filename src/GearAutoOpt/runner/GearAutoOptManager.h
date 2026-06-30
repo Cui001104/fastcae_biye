@@ -60,8 +60,11 @@ public:
     /// 当前所有已评估个体（按代分组）
     const QVector<QList<GearDesignPoint>>& allPoints() const { return _allPoints; }
 
-    /// 提取最终 Pareto 前沿
+    /// 提取最终 Pareto 前沿（代理模式结束后为 CCX 真实验证样本前沿）
     QList<GearDesignPoint> paretoFront() const;
+
+    /// 代理优化结束时由 CCX 验证样本构成的全量真实设计点（供导出/对比表）
+    const QList<GearDesignPoint>& surrogateValidatedPoints() const { return _surrogateValidatedPoints; }
 
 public slots:
     /// 启动优化（在 QThread::started 信号后调用）
@@ -86,7 +89,7 @@ private:
         int generation,
         CcxEvalSummary* summary = nullptr,
         const std::function<void(int, const GearDesignPoint&, bool)>& pointCallback = {});
-    /// 代理辅助 infill 验证：按配置选择串行或并行 CCX。
+    /// CCX 批量评估（初始 LHS 补样与 infill 验证共用）：先串行 CAD/网格，再按配置并行 CCX。
     void evaluateInfillByCcx(
         Population& pop,
         int generation,
@@ -124,6 +127,9 @@ private:
 
     // NSGA-II 种群
     Population _population;
+
+    /// 代理模式：从 DB 重载的全部 CCX 验证样本（真实目标值，非代理预测）
+    QList<GearDesignPoint> _surrogateValidatedPoints;
 };
 
 } // namespace GearAutoOpt

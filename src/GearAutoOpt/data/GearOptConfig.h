@@ -76,7 +76,7 @@ struct GEARAUTOOPTAPI SolverParams {
 	double  contactAdjustMm  = 0.0;
 	QString runBaseDir;               ///< 本次优化结果根目录（必选）；其下生成 GearOptResults.db 与 0_0/ 等工况子目录
 	int     threads        = 0;       ///< OMP_NUM_THREADS；0 = 跟随系统
-	/// infill CCX 验证：多工况并发（仅代理辅助 infill 阶段生效）。
+	/// 代理辅助优化 CCX 验证：初始 LHS 补样与 infill 阶段均可多工况并发。
 	bool    parallelCcxEnabled = false;
 	int     parallelCcxJobs    = 2;   ///< 同时运行的 CCX 工况数
 	int     ccxThreadsPerJob     = 4;   ///< 每个 CCX 进程的 OMP 线程数
@@ -90,6 +90,8 @@ struct GEARAUTOOPTAPI SolverParams {
 	bool    surrogateAssisted  = false;
 	/// false = Normal 日志；true = Debug（网格/CCX 识别细节 + qDebug）。
 	bool    debugMode          = false;
+	/// 双齿轮 mentor 加载调试：legacy | gear1_positive | gear1_negative
+	QString gearDriveMode      = QStringLiteral("legacy");
 };
 
 /// 设计变量是否参与 NSGA-II（未勾选则 bounds 固定为基准值）。
