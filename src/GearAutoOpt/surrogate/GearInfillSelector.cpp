@@ -14,16 +14,28 @@ namespace GearAutoOpt {
 
 namespace {
 
-struct ScoredIndividual {
+struct ExploreCandidate {
 	Individual ind;
-	double score = 0.0;
-	double minDistNorm = 0.0;
-	double localResidualNorm = 0.0;
-	double alphaUsed = 1.0;
-	double betaUsed = 0.0;
-	int neighborCount = 0;
-	QString caseHash;
+	double     minDistNorm = 0.0;
+	QString    caseHash;
 };
+
+void fixIndividualForSurrogateInfill(Individual& ind,
+                                     const GearOptConfig& cfg,
+                                     const GearDesignPoint& basePoint,
+                                     double fixedWidthMm)
+{
+	if (ind.vars.size() < VAR_COUNT)
+		ind.vars.resize(VAR_COUNT);
+	if (cfg.useOptimizationBase) {
+		ind.vars[VAR_MODULE]   = basePoint.module;
+		ind.vars[VAR_Z1]       = basePoint.z1;
+		ind.vars[VAR_Z2]       = basePoint.z2;
+		ind.vars[VAR_ALPHA]    = basePoint.alpha;
+	}
+	ind.vars[VAR_COMMON_WIDTH] = fixedWidthMm;
+	repairAndEval(ind, cfg);
+}
 
 double clamp01(double v)
 {
@@ -159,6 +171,196 @@ GearDesignPoint designPointForCaseHash(const Individual& ind,
 	checkGearOptDesignPointBounds(dp, cfg);
 	dp.applyRunSimDefaults(cfg, fixedMeshSizeMm, runMeshAuto);
 	return dp;
+}
+
+QVector<QVector<double>> normalizedVectorsFromPopulation(
+    const Population& pop,
+    const QVector<double>& lo,
+    const QVector<double>& hi,
+    const GearOptConfig& cfg,
+    const GearDesignPoint& basePoint,
+    double fixedMeshSizeMm,
+    bool runMeshAuto,
+    double fixedWidthMm)
+{
+	QVector<QVector<double>> out;
+	out.reserve(pop.size());
+	for (const Individual& ind : pop) {
+		const GearDesignPoint dp =
+		    designPointForCaseHash(ind, cfg, basePoint, fixedMeshSizeMm, runMeshAuto, fixedWidthMm);
+		out.append(normalizeByBounds(surrogateInputVars(dp), lo, hi));
+	}
+	return out;
+}
+
+struct ScoredIndividual {
+	Individual ind;
+	double score = 0.0;
+	double minDistNorm = 0.0;
+	double localResidualNorm = 0.0;
+	double alphaUsed = 1.0;
+	double betaUsed = 0.0;
+	int neighborCount = 0;
+	QString caseHash;
+};
+
+Population selectGlobalExplorationImpl(const QVector<SurrogateSample>& existingSamples,
+                                     const GlobalExplorationConfig& exploreCfg,
+                                     const GearOptConfig& cfg,
+                                     const GearDesignPoint& basePoint,
+                                     double fixedMeshSizeMm,
+                                     bool runMeshAuto,
+                                     double fixedWidthMm,
+                                     const QSet<QString>& existingCaseHashes,
+                                     const QSet<QString>& existingDesignHashes,
+                                     const QSet<QString>& failedCaseHashes,
+                                     const Population& excludeNearPoints,
+                                     int k,
+                                     int seed)
+{
+	if (k <= 0)
+		return {};
+
+	const auto logMsg = [&](const QString& msg) {
+		if (exploreCfg.logFn)
+			exploreCfg.logFn(msg);
+		else
+			qDebug().noquote() << msg;
+	};
+
+	const QVector<double> lo = inputBoundsLower(cfg);
+	const QVector<double> hi = inputBoundsUpper(cfg);
+	const double minDesignDist =
+	    exploreCfg.minDesignDistNorm > 0.0 ? exploreCfg.minDesignDistNorm : 1e-4;
+
+	QVector<QVector<double>> existingNorm;
+	QSet<QString> knownCaseHashes = existingCaseHashes;
+	QSet<QString> knownDesignHashes = existingDesignHashes;
+	for (const SurrogateSample& s : existingSamples) {
+		if (!s.x.isEmpty())
+			existingNorm.append(normalizeByBounds(s.x, lo, hi));
+		if (!s.caseHash.isEmpty())
+			knownCaseHashes.insert(s.caseHash);
+		if (!s.designHash.isEmpty())
+			knownDesignHashes.insert(s.designHash);
+	}
+
+	const QVector<QVector<double>> excludeNorm =
+	    normalizedVectorsFromPopulation(excludeNearPoints, lo, hi, cfg, basePoint,
+	                                    fixedMeshSizeMm, runMeshAuto, fixedWidthMm);
+
+	const int candidateCount = std::max(100, exploreCfg.explorationCandidateCount);
+	Population lhsPop = initLatin(candidateCount, cfg, seed);
+	for (Individual& ind : lhsPop)
+		fixIndividualForSurrogateInfill(ind, cfg, basePoint, fixedWidthMm);
+
+	int skippedRelief    = 0;
+	int skippedFailed    = 0;
+	int skippedKnown     = 0;
+	int skippedDuplicate = 0;
+	QVector<ExploreCandidate> valid;
+
+	for (const Individual& ind : lhsPop) {
+		GearDesignPoint dp =
+		    designPointForCaseHash(ind, cfg, basePoint, fixedMeshSizeMm, runMeshAuto, fixedWidthMm);
+		QString reliefReason;
+		if (!validateReliefDesign(dp, &reliefReason)) {
+			++skippedRelief;
+			continue;
+		}
+
+		const QString caseH = GearOptResultDatabase::caseHash(dp);
+		if (failedCaseHashes.contains(caseH)) {
+			++skippedFailed;
+			continue;
+		}
+		if (knownCaseHashes.contains(caseH)) {
+			++skippedKnown;
+			continue;
+		}
+		const QString designH = GearOptResultDatabase::designHash(dp);
+		if (knownDesignHashes.contains(designH)) {
+			++skippedKnown;
+			continue;
+		}
+
+		const QVector<double> xNorm = normalizeByBounds(surrogateInputVars(dp), lo, hi);
+		double minDistExisting = 1.0;
+		if (!existingNorm.isEmpty())
+			minDistExisting = minNormalizedDistanceTo(xNorm, existingNorm);
+		if (!existingNorm.isEmpty() && minDistExisting < minDesignDist) {
+			++skippedDuplicate;
+			continue;
+		}
+
+		double minDistExclude = 1.0;
+		if (!excludeNorm.isEmpty())
+			minDistExclude = minNormalizedDistanceTo(xNorm, excludeNorm);
+		if (!excludeNorm.isEmpty() && minDistExclude < minDesignDist) {
+			++skippedDuplicate;
+			continue;
+		}
+
+		ExploreCandidate ec;
+		ec.ind         = ind;
+		ec.minDistNorm = minDistExisting;
+		ec.caseHash    = caseH;
+		valid.append(ec);
+	}
+
+	std::sort(valid.begin(), valid.end(), [](const ExploreCandidate& a, const ExploreCandidate& b) {
+		return a.minDistNorm > b.minDistNorm;
+	});
+
+	QSet<QString> selectedCaseHashes;
+	QVector<QVector<double>> selectedNorm;
+	Population out;
+	for (const ExploreCandidate& ec : valid) {
+		if (out.size() >= k)
+			break;
+
+		const GearDesignPoint dp =
+		    designPointForCaseHash(ec.ind, cfg, basePoint, fixedMeshSizeMm, runMeshAuto, fixedWidthMm);
+		const QVector<double> candNorm = normalizeByBounds(surrogateInputVars(dp), lo, hi);
+
+		double minDistCombined = minNormalizedDistanceTo(candNorm, existingNorm);
+		for (const QVector<double>& sel : excludeNorm)
+			minDistCombined = std::min(minDistCombined, normalizedSpaceDistance(candNorm, sel));
+		for (const QVector<double>& sel : selectedNorm)
+			minDistCombined = std::min(minDistCombined, normalizedSpaceDistance(candNorm, sel));
+		if (minDistCombined < minDesignDist)
+			continue;
+
+		if (selectedCaseHashes.contains(ec.caseHash))
+			continue;
+
+		selectedCaseHashes.insert(ec.caseHash);
+		selectedNorm.append(candNorm);
+		out.append(ec.ind);
+		logMsg(QStringLiteral("[Infill][Explore] selected case_hash=%1 minDistNorm=%2 %3")
+		           .arg(ec.caseHash)
+		           .arg(ec.minDistNorm, 0, 'g', 6)
+		           .arg(formatDesignVarsLine(dp)));
+	}
+
+	logMsg(QStringLiteral(
+	           "[Infill][Explore] candidates=%1 valid=%2 skippedRelief=%3 skippedFailed=%4 "
+	           "skippedKnown=%5 skippedDuplicate=%6 selected=%7")
+	           .arg(candidateCount)
+	           .arg(valid.size())
+	           .arg(skippedRelief)
+	           .arg(skippedFailed)
+	           .arg(skippedKnown)
+	           .arg(skippedDuplicate)
+	           .arg(out.size()));
+
+	if (out.size() < k) {
+		logMsg(QStringLiteral("[Infill][Explore] warning: requested %1 points, selected %2")
+		                          .arg(k)
+		                          .arg(out.size()));
+	}
+
+	return out;
 }
 
 Population selectImpl(const Population& surrogatePareto,
@@ -351,7 +553,7 @@ Population selectImpl(const Population& surrogatePareto,
 		selectedNorm.append(candNorm);
 		out.append(si.ind);
 		logMsg(QStringLiteral(
-		           "[Infill] selected rank=%1 case_hash=%2 minDistNorm=%3 localResidualNorm=%4 "
+		           "[Infill][Exploit] selected rank=%1 case_hash=%2 minDistNorm=%3 localResidualNorm=%4 "
 		           "score=%5 k=%6 alpha=%7 beta=%8 | %9")
 		           .arg(si.ind.rank)
 		           .arg(si.caseHash.isEmpty() ? QStringLiteral("n/a") : si.caseHash)
@@ -438,6 +640,27 @@ Population GearInfillSelector::selectSparseParetoPoints(const Population& surrog
 QString GearInfillSelector::formatDesignVarsForLog(const GearDesignPoint& dp)
 {
 	return formatDesignVarsLine(dp);
+}
+
+Population GearInfillSelector::selectGlobalExplorationPoints(
+    const QVector<SurrogateSample>& existingSamples,
+    const GlobalExplorationConfig& exploreCfg,
+    const GearOptConfig& cfg,
+    const GearDesignPoint& basePoint,
+    double fixedMeshSizeMm,
+    bool runMeshAuto,
+    double fixedWidthMm,
+    const QSet<QString>& existingCaseHashes,
+    const QSet<QString>& existingDesignHashes,
+    const QSet<QString>& failedCaseHashes,
+    const Population& excludeNearPoints,
+    int k,
+    int seed)
+{
+	return selectGlobalExplorationImpl(existingSamples, exploreCfg, cfg, basePoint,
+	                                   fixedMeshSizeMm, runMeshAuto, fixedWidthMm,
+	                                   existingCaseHashes, existingDesignHashes, failedCaseHashes,
+	                                   excludeNearPoints, k, seed);
 }
 
 } // namespace GearAutoOpt

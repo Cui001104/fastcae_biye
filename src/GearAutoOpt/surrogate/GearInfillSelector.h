@@ -22,6 +22,13 @@ struct GEARAUTOOPTAPI InfillScoringConfig {
 	std::function<void(const QString&)> logFn;
 };
 
+/// 全局探索补点：LHS 候选 + Maximin Distance（不看代理目标/残差）。
+struct GEARAUTOOPTAPI GlobalExplorationConfig {
+	int    explorationCandidateCount = 2000;
+	double minDesignDistNorm         = 0.03;
+	std::function<void(const QString&)> logFn;
+};
+
 class GEARAUTOOPTAPI GearInfillSelector {
 public:
 	static Population selectSparseParetoPoints(const Population& surrogatePareto,
@@ -52,6 +59,23 @@ public:
 	                                           const QSet<QString>& existingDesignHashes,
 	                                           const QSet<QString>& failedCaseHashes,
 	                                           int k);
+
+	/// 全局探索补点：LHS 候选中按到已有 CCX 样本的最大最小归一化距离选 k 个。
+	/// excludeNearPoints：本轮已选 exploitation 点（过滤 near-duplicate）。
+	static Population selectGlobalExplorationPoints(
+	    const QVector<SurrogateSample>& existingSamples,
+	    const GlobalExplorationConfig& exploreCfg,
+	    const GearOptConfig& cfg,
+	    const GearDesignPoint& basePoint,
+	    double fixedMeshSizeMm,
+	    bool runMeshAuto,
+	    double fixedWidthMm,
+	    const QSet<QString>& existingCaseHashes,
+	    const QSet<QString>& existingDesignHashes,
+	    const QSet<QString>& failedCaseHashes,
+	    const Population& excludeNearPoints,
+	    int k,
+	    int seed);
 
 	/// infill 日志：7 维代理设计变量。
 	static QString formatDesignVarsForLog(const GearDesignPoint& dp);

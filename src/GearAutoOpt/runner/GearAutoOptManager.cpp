@@ -1554,43 +1554,130 @@ void GearAutoOptManager::startSurrogateAssisted()
                 knownDesignHashes.insert(s.designHash);
         }
 
-        auto caseHashForIndividual = [&](const Individual& ind) -> QString {
-            GearDesignPoint dp = ind.toDesignPoint();
-            if (_cfg.useOptimizationBase) {
-                dp.module = baseDp.module;
-                dp.z1     = baseDp.z1;
-                dp.z2     = baseDp.z2;
-                dp.alpha  = baseDp.alpha;
+        auto mergeInfillKnownHashes = [&](QSet<QString>& caseHashes, QSet<QString>& designHashes,
+                                          const Population& pop) {
+            for (const Individual& ind : pop) {
+                GearDesignPoint dp = ind.toDesignPoint();
+                if (_cfg.useOptimizationBase) {
+                    dp.module = baseDp.module;
+                    dp.z1     = baseDp.z1;
+                    dp.z2     = baseDp.z2;
+                    dp.alpha  = baseDp.alpha;
+                }
+                dp.commonWidth = _fixedCommonWidthMm;
+                applySurrogateInputVars(dp, surrogateInputVars(dp));
+                checkGearOptDesignPointBounds(dp, _cfg);
+                dp.applyRunSimDefaults(_cfg, _fixedMeshSizeMm, _runMeshAuto);
+                caseHashes.insert(GearOptResultDatabase::caseHash(dp));
+                designHashes.insert(GearOptResultDatabase::designHash(dp));
             }
-            dp.commonWidth = _fixedCommonWidthMm;
-            applySurrogateInputVars(dp, surrogateInputVars(dp));
-            checkGearOptDesignPointBounds(dp, _cfg);
-            dp.applyRunSimDefaults(_cfg, _fixedMeshSizeMm, _runMeshAuto);
-            return GearOptResultDatabase::caseHash(dp);
         };
 
-        Population infill = GearInfillSelector::selectSparseParetoPoints(
-            surrogatePareto, samples, sampleResiduals, infillScoring, _cfg, baseDp,
-            _fixedMeshSizeMm, _runMeshAuto, knownCaseHashes, knownDesignHashes, failedCaseHashes,
-            infillCount);
-        if (infill.size() < infillCount) {
-            QSet<QString> fallbackKnownHashes = knownCaseHashes;
-            QSet<QString> fallbackKnownDesignHashes = knownDesignHashes;
-            for (const Individual& ind : infill)
-                fallbackKnownHashes.insert(caseHashForIndividual(ind));
-
-            const int remaining = infillCount - infill.size();
-            Population fallback = GearInfillSelector::selectSparseParetoPoints(
-                surrogatePop, samples, sampleResiduals, infillScoring, _cfg, baseDp,
-                _fixedMeshSizeMm, _runMeshAuto, fallbackKnownHashes, fallbackKnownDesignHashes,
-                failedCaseHashes, remaining);
-            if (!fallback.isEmpty()) {
-                emit log(QStringLiteral("[GearOpt][Surrogate] round %1: Pareto infill selected=%2, sparse fallback added=%3")
-                             .arg(round)
-                             .arg(infill.size())
-                             .arg(fallback.size()));
-                infill += fallback;
+        auto selectExploitPoints = [&](int count, const Population& paretoSource,
+                                     QSet<QString> caseHashes, QSet<QString> designHashes) -> Population {
+            if (count <= 0)
+                return {};
+            Population out = GearInfillSelector::selectSparseParetoPoints(
+                paretoSource, samples, sampleResiduals, infillScoring, _cfg, baseDp,
+                _fixedMeshSizeMm, _runMeshAuto, caseHashes, designHashes, failedCaseHashes, count);
+            if (out.size() < count) {
+                mergeInfillKnownHashes(caseHashes, designHashes, out);
+                const int remaining = count - out.size();
+                Population fallback = GearInfillSelector::selectSparseParetoPoints(
+                    surrogatePop, samples, sampleResiduals, infillScoring, _cfg, baseDp,
+                    _fixedMeshSizeMm, _runMeshAuto, caseHashes, designHashes, failedCaseHashes,
+                    remaining);
+                if (!fallback.isEmpty())
+                    out += fallback;
             }
+            return out;
+        };
+
+        int exploreCount = 0;
+        QString infillPhase;
+        if (round <= 5) {
+            exploreCount = static_cast<int>(std::ceil(infillCount * 2.0 / 3.0));
+            infillPhase  = QStringLiteral("early");
+        } else if (round <= 12) {
+            exploreCount = static_cast<int>(std::ceil(infillCount * 1.0 / 3.0));
+            infillPhase  = QStringLiteral("mid");
+        } else {
+            exploreCount = 0;
+            infillPhase  = QStringLiteral("late");
+        }
+        const int exploitCount = std::max(0, infillCount - exploreCount);
+
+        emit log(QStringLiteral(
+                     "[Infill][Adaptive] round=%1 infillCount=%2 exploitCount=%3 exploreCount=%4 phase=%5")
+                     .arg(round)
+                     .arg(infillCount)
+                     .arg(exploitCount)
+                     .arg(exploreCount)
+                     .arg(infillPhase));
+
+        Population exploitPoints =
+            selectExploitPoints(exploitCount, surrogatePareto, knownCaseHashes, knownDesignHashes);
+
+        Population explorePoints;
+        if (exploreCount > 0) {
+            GlobalExplorationConfig exploreCfg;
+            exploreCfg.explorationCandidateCount = 2000;
+            exploreCfg.minDesignDistNorm         = infillScoring.minDesignDistNorm;
+            exploreCfg.logFn = [this](const QString& msg) { emit log(msg); };
+            const int exploreSeed = _cfg.nsga2.randomSeed + round * 31337;
+            explorePoints         = GearInfillSelector::selectGlobalExplorationPoints(
+                samples, exploreCfg, _cfg, baseDp, _fixedMeshSizeMm, _runMeshAuto,
+                _fixedCommonWidthMm, knownCaseHashes, knownDesignHashes, failedCaseHashes,
+                exploitPoints, exploreCount, exploreSeed);
+        }
+
+        Population infill = exploitPoints + explorePoints;
+
+        if (infill.size() < infillCount) {
+            int need = infillCount - infill.size();
+            QSet<QString> supplementCaseHashes = knownCaseHashes;
+            QSet<QString> supplementDesignHashes = knownDesignHashes;
+            mergeInfillKnownHashes(supplementCaseHashes, supplementDesignHashes, infill);
+
+            if (need > 0) {
+                Population extraExploit = selectExploitPoints(need, surrogatePareto, supplementCaseHashes,
+                                                            supplementDesignHashes);
+                if (!extraExploit.isEmpty()) {
+                    emit log(QStringLiteral(
+                                 "[Infill][Adaptive] round %1: exploitation supplement added %2")
+                                 .arg(round)
+                                 .arg(extraExploit.size()));
+                    infill += extraExploit;
+                }
+            }
+
+            need = infillCount - infill.size();
+            if (need > 0) {
+                GlobalExplorationConfig exploreCfg;
+                exploreCfg.explorationCandidateCount = 2000;
+                exploreCfg.minDesignDistNorm         = infillScoring.minDesignDistNorm;
+                exploreCfg.logFn = [this](const QString& msg) { emit log(msg); };
+                const int exploreSeed = _cfg.nsga2.randomSeed + round * 31337 + 17;
+                Population extraExplore = GearInfillSelector::selectGlobalExplorationPoints(
+                    samples, exploreCfg, _cfg, baseDp, _fixedMeshSizeMm, _runMeshAuto,
+                    _fixedCommonWidthMm, supplementCaseHashes, supplementDesignHashes,
+                    failedCaseHashes, infill, need, exploreSeed);
+                if (!extraExplore.isEmpty()) {
+                    emit log(QStringLiteral(
+                                 "[Infill][Adaptive] round %1: exploration supplement added %2")
+                                 .arg(round)
+                                 .arg(extraExplore.size()));
+                    infill += extraExplore;
+                }
+            }
+        }
+
+        if (!exploitPoints.isEmpty() || !explorePoints.isEmpty()) {
+            emit log(QStringLiteral("[Infill][Adaptive] round %1: exploitation=%2 exploration=%3 combined=%4")
+                         .arg(round)
+                         .arg(exploitPoints.size())
+                         .arg(explorePoints.size())
+                         .arg(infill.size()));
         }
 
         {
