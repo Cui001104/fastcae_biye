@@ -15,6 +15,8 @@
 
 namespace GearAutoOpt {
 
+struct SurrogateCcxLogOptions;
+
 /// CCX 评估统计（infill 验证时区分新算与 cache 复用）。
 struct GEARAUTOOPTAPI CcxEvalSummary {
 	int           newCcxCount     = 0;
@@ -88,18 +90,21 @@ private:
         Population& pop,
         int generation,
         CcxEvalSummary* summary = nullptr,
-        const std::function<void(int, const GearDesignPoint&, bool)>& pointCallback = {});
+        const std::function<void(int, const GearDesignPoint&, bool)>& pointCallback = {},
+        const SurrogateCcxLogOptions* ccxLog = nullptr);
     /// CCX 批量评估（初始 LHS 补样与 infill 验证共用）：先串行 CAD/网格，再按配置并行 CCX。
     void evaluateInfillByCcx(
         Population& pop,
         int generation,
         CcxEvalSummary* summary = nullptr,
-        const std::function<void(int, const GearDesignPoint&, bool)>& pointCallback = {});
+        const std::function<void(int, const GearDesignPoint&, bool)>& pointCallback = {},
+        const SurrogateCcxLogOptions* ccxLog = nullptr);
     void evaluateInfillByCcxParallel(
         Population& pop,
         int generation,
         CcxEvalSummary* summary,
-        const std::function<void(int, const GearDesignPoint&, bool)>& pointCallback);
+        const std::function<void(int, const GearDesignPoint&, bool)>& pointCallback,
+        const SurrogateCcxLogOptions* ccxLog = nullptr);
     void evaluatePopulationBySurrogate(Population& pop,
                                        int generation,
                                        const GearSurrogateModel& model);

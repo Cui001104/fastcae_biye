@@ -30,6 +30,7 @@ set(_gear_opt_surrogate_cpp
 	"${CMAKE_CURRENT_SOURCE_DIR}/surrogate/GearInfillSelector.cpp"
 	"${CMAKE_CURRENT_SOURCE_DIR}/surrogate/GearSurrogateMetrics.cpp"
 )
+set(_gear_opt_verbose_log_cpp "${CMAKE_CURRENT_SOURCE_DIR}/runner/GearSurrogateVerboseLog.cpp")
 if(EXISTS "${_gear_opt_bridge_cpp}")
 	list(APPEND _source "${_gear_opt_bridge_cpp}")
 	list(REMOVE_DUPLICATES _source)
@@ -71,6 +72,9 @@ foreach(_surrogate_cpp IN LISTS _gear_opt_surrogate_cpp)
 		list(APPEND _source "${_surrogate_cpp}")
 	endif()
 endforeach()
+if(EXISTS "${_gear_opt_verbose_log_cpp}")
+	list(APPEND _source "${_gear_opt_verbose_log_cpp}")
+endif()
 if(EXISTS "${_gear_opt_failed_retry_cpp}")
 	list(APPEND _source "${_gear_opt_failed_retry_cpp}")
 endif()

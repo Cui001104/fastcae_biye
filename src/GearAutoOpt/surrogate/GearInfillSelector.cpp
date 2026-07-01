@@ -258,6 +258,7 @@ Population selectGlobalExplorationImpl(const QVector<SurrogateSample>& existingS
 	int skippedFailed    = 0;
 	int skippedKnown     = 0;
 	int skippedDuplicate = 0;
+	int skippedTooClose  = 0;
 	QVector<ExploreCandidate> valid;
 
 	for (const Individual& ind : lhsPop) {
@@ -315,6 +316,8 @@ Population selectGlobalExplorationImpl(const QVector<SurrogateSample>& existingS
 	QSet<QString> selectedCaseHashes;
 	QVector<QVector<double>> selectedNorm;
 	Population out;
+	if (exploreCfg.outSelectionMeta)
+		exploreCfg.outSelectionMeta->clear();
 	for (const ExploreCandidate& ec : valid) {
 		if (out.size() >= k)
 			break;
@@ -328,8 +331,10 @@ Population selectGlobalExplorationImpl(const QVector<SurrogateSample>& existingS
 			minDistCombined = std::min(minDistCombined, normalizedSpaceDistance(candNorm, sel));
 		for (const QVector<double>& sel : selectedNorm)
 			minDistCombined = std::min(minDistCombined, normalizedSpaceDistance(candNorm, sel));
-		if (minDistCombined < minDesignDist)
+		if (minDistCombined < minDesignDist) {
+			++skippedTooClose;
 			continue;
+		}
 
 		if (selectedCaseHashes.contains(ec.caseHash))
 			continue;
@@ -337,6 +342,11 @@ Population selectGlobalExplorationImpl(const QVector<SurrogateSample>& existingS
 		selectedCaseHashes.insert(ec.caseHash);
 		selectedNorm.append(candNorm);
 		out.append(ec.ind);
+		if (exploreCfg.outSelectionMeta) {
+			InfillSelectionMeta meta;
+			meta.minDistNorm = ec.minDistNorm;
+			exploreCfg.outSelectionMeta->append(meta);
+		}
 		logMsg(QStringLiteral("[Infill][Explore] selected case_hash=%1 minDistNorm=%2 %3")
 		           .arg(ec.caseHash)
 		           .arg(ec.minDistNorm, 0, 'g', 6)
@@ -360,6 +370,19 @@ Population selectGlobalExplorationImpl(const QVector<SurrogateSample>& existingS
 		                          .arg(out.size()));
 	}
 
+	if (exploreCfg.outFilterStats) {
+		InfillFilterStats fs;
+		fs.candidateTotal         = candidateCount;
+		fs.validAfterRelief       = valid.size();
+		fs.skipFailed             = skippedFailed;
+		fs.skipKnownCase          = skippedKnown;
+		fs.skipKnownDesign        = 0;
+		fs.skipNearDuplicate      = skippedDuplicate;
+		fs.skipTooCloseToSelected = skippedTooClose;
+		fs.selected               = out.size();
+		*exploreCfg.outFilterStats = fs;
+	}
+
 	return out;
 }
 
@@ -380,6 +403,10 @@ Population selectImpl(const Population& surrogatePareto,
 {
 	if (k <= 0 || surrogatePareto.isEmpty())
 		return {};
+
+	InfillFilterStats filterStats;
+	if (scoring.outFilterStats)
+		filterStats.candidateTotal = surrogatePareto.size();
 
 	const auto logMsg = [&](const QString& msg) {
 		if (scoring.logFn)
@@ -421,6 +448,8 @@ Population selectImpl(const Population& surrogatePareto,
 		const QVector<double> xNorm = normalizeByBounds(surrogateInputVars(dp), lo, hi);
 		const double distExisting = minNormalizedDistanceTo(xNorm, existingNorm);
 		if (!existingNorm.isEmpty() && distExisting < minDesignDist) {
+			if (scoring.outFilterStats)
+				++filterStats.skipNearDuplicate;
 			logMsg(QStringLiteral("[Infill] skip near-duplicate design vars minDist=%1 < %2 | %3")
 			           .arg(distExisting, 0, 'g', 6)
 			           .arg(minDesignDist, 0, 'g', 6)
@@ -431,16 +460,22 @@ Population selectImpl(const Population& surrogatePareto,
 		if (cfg && basePoint) {
 			const QString caseH = GearOptResultDatabase::caseHash(dp);
 			if (failedCaseHashes.contains(caseH)) {
+				if (scoring.outFilterStats)
+					++filterStats.skipFailed;
 				logMsg(QStringLiteral("[Infill] skip failed case_hash=%1").arg(caseH));
 				continue;
 			}
 			if (knownCaseHashes.contains(caseH)) {
+				if (scoring.outFilterStats)
+					++filterStats.skipKnownCase;
 				logMsg(QStringLiteral("[Infill] skip existing cache: %1 | %2")
 				           .arg(caseH, formatDesignVarsLine(dp)));
 				continue;
 			}
 			const QString designH = GearOptResultDatabase::designHash(dp);
 			if (knownDesignHashes.contains(designH)) {
+				if (scoring.outFilterStats)
+					++filterStats.skipKnownDesign;
 				logMsg(QStringLiteral("[Infill] skip existing design_hash: %1 | %2")
 				           .arg(designH, formatDesignVarsLine(dp)));
 				continue;
@@ -497,6 +532,8 @@ Population selectImpl(const Population& surrogatePareto,
 			si.caseHash = GearOptResultDatabase::caseHash(hashDp);
 		}
 		scored.append(si);
+		if (scoring.outFilterStats)
+			++filterStats.validAfterRelief;
 	}
 
 	std::sort(scored.begin(), scored.end(), [](const ScoredIndividual& a, const ScoredIndividual& b) {
@@ -506,6 +543,8 @@ Population selectImpl(const Population& surrogatePareto,
 	QSet<QString> selectedCaseHashes;
 	QVector<QVector<double>> selectedNorm;
 	Population out;
+	if (scoring.outSelectionMeta)
+		scoring.outSelectionMeta->clear();
 	for (const ScoredIndividual& si : scored) {
 		if (out.size() >= k)
 			break;
@@ -528,6 +567,8 @@ Population selectImpl(const Population& surrogatePareto,
 			    std::min(minDistToRealOrSelected, normalizedSpaceDistance(candNorm, sel));
 		}
 		if (minDistToRealOrSelected < minDesignDist) {
+			if (scoring.outFilterStats)
+				++filterStats.skipTooCloseToSelected;
 			logMsg(QStringLiteral("[Infill] skip near-duplicate minDist=%1 < %2 | %3")
 			           .arg(minDistToRealOrSelected, 0, 'g', 6)
 			           .arg(minDesignDist, 0, 'g', 6)
@@ -552,6 +593,13 @@ Population selectImpl(const Population& surrogatePareto,
 
 		selectedNorm.append(candNorm);
 		out.append(si.ind);
+		if (scoring.outSelectionMeta) {
+			InfillSelectionMeta meta;
+			meta.minDistNorm       = si.minDistNorm;
+			meta.localResidualNorm = si.localResidualNorm;
+			meta.score             = si.score;
+			scoring.outSelectionMeta->append(meta);
+		}
 		logMsg(QStringLiteral(
 		           "[Infill][Exploit] selected rank=%1 case_hash=%2 minDistNorm=%3 localResidualNorm=%4 "
 		           "score=%5 k=%6 alpha=%7 beta=%8 | %9")
@@ -570,6 +618,11 @@ Population selectImpl(const Population& surrogatePareto,
 		logMsg(QStringLiteral("[Infill] warning: requested %1 points, selected %2")
 		                          .arg(k)
 		                          .arg(out.size()));
+	}
+
+	if (scoring.outFilterStats) {
+		filterStats.selected = out.size();
+		*scoring.outFilterStats = filterStats;
 	}
 
 	return out;

@@ -28,6 +28,7 @@ struct SurrogateSampleLoadStats {
 	int totalSamples{0};
 	int validSamples{0};
 	int failedSkipped{0};
+	int duplicateSkipped{0};
 };
 
 struct FailedCaseDbRow {

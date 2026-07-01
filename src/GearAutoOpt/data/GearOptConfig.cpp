@@ -397,6 +397,7 @@ QJsonObject GearOptConfig::toJson() const
 	solverJson["ccx_rigid_hub_samples"] = solver.ccxRigidHubSamples;
 	solverJson["surrogate_assisted"]    = solver.surrogateAssisted;
 	solverJson["debug_mode"]            = solver.debugMode;
+	solverJson["surrogate_verbose"]     = solver.surrogateVerbose;
 	solverJson["threads"]               = solver.threads;
 	solverJson["parallel_ccx_enabled"]  = solver.parallelCcxEnabled;
 	solverJson["parallel_ccx_jobs"]     = solver.parallelCcxJobs;
@@ -501,6 +502,7 @@ GearOptConfig GearOptConfig::fromJson(const QJsonObject& root)
 		c.solver.ccxRigidHubSamples = sv.value("ccx_rigid_hub_samples").toInt(24);
 	c.solver.surrogateAssisted = sv.value("surrogate_assisted").toBool(false);
 	c.solver.debugMode         = sv.value("debug_mode").toBool(false);
+	c.solver.surrogateVerbose  = sv.value("surrogate_verbose").toBool(true);
 	c.solver.ccxUseRotationDrive = sv.value("ccx_use_rotation_drive").toBool(false);
 	if (sv.contains("threads"))
 		c.solver.threads = sv.value("threads").toInt(0);
