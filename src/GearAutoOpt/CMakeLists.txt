@@ -29,6 +29,7 @@ set(_gear_opt_surrogate_cpp
 	"${CMAKE_CURRENT_SOURCE_DIR}/surrogate/GearSurrogateModel.cpp"
 	"${CMAKE_CURRENT_SOURCE_DIR}/surrogate/GearInfillSelector.cpp"
 	"${CMAKE_CURRENT_SOURCE_DIR}/surrogate/GearSurrogateMetrics.cpp"
+	"${CMAKE_CURRENT_SOURCE_DIR}/surrogate/GearSurrogateSampleValidation.cpp"
 )
 set(_gear_opt_verbose_log_cpp "${CMAKE_CURRENT_SOURCE_DIR}/runner/GearSurrogateVerboseLog.cpp")
 if(EXISTS "${_gear_opt_bridge_cpp}")

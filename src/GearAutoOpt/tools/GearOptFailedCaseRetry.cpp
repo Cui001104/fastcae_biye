@@ -34,6 +34,7 @@ void updateRowsInDatabase(GearOptResultDatabase& db,
                           const GearDesignPoint& dp,
                           bool success,
                           const QString& errorMsg,
+                          const QStringList& surrogateTargets,
                           const std::function<void(const QString&)>& logFn)
 {
 	if (!db.isOpen())
@@ -43,7 +44,7 @@ void updateRowsInDatabase(GearOptResultDatabase& db,
 		if (row.databasePath != db.databasePath())
 			continue;
 		if (success) {
-			const bool ok = db.updateDesignPointResultByRowId(row.rowId, dp);
+			const bool ok = db.updateDesignPointResultByRowId(row.rowId, dp, surrogateTargets);
 			if (logFn) {
 				logFn(QStringLiteral("[Retry] case_hash=%1 row_id=%2 dbUpdateStatus=%3")
 				          .arg(rec.caseHash)
@@ -200,6 +201,7 @@ FailedCaseRetryStats GearOptFailedCaseRetry::run(const FailedCaseRetryOptions& o
 	mergeFailedRecords(globalDb, opt.baseCaseHash, opt.fixedCommonWidthMm, merged);
 
 	stats.totalFailed = merged.size();
+	const QStringList surrogateTargets = opt.cfg.effectiveSurrogateTargets();
 	if (logFn) {
 		logFn(QStringLiteral("[Retry] found %1 unique failed case_hash (filter baseCase=%2 width=%3)")
 		          .arg(stats.totalFailed)
@@ -260,8 +262,8 @@ FailedCaseRetryStats GearOptFailedCaseRetry::run(const FailedCaseRetryOptions& o
 				          .arg(meshParams.rootSize, 0, 'f', 2));
 			}
 			++stats.stillFailed;
-			updateRowsInDatabase(runDb, rec, dp, false, err, logFn);
-			updateRowsInDatabase(globalDb, rec, dp, false, err, logFn);
+			updateRowsInDatabase(runDb, rec, dp, false, err, surrogateTargets, logFn);
+			updateRowsInDatabase(globalDb, rec, dp, false, err, surrogateTargets, logFn);
 			if (QApplication::instance())
 				QApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
 			continue;
@@ -362,8 +364,8 @@ FailedCaseRetryStats GearOptFailedCaseRetry::run(const FailedCaseRetryOptions& o
 
 		if (success && converged) {
 			++stats.fixed;
-			updateRowsInDatabase(runDb, rec, dp, true, QString(), logFn);
-			updateRowsInDatabase(globalDb, rec, dp, true, QString(), logFn);
+			updateRowsInDatabase(runDb, rec, dp, true, QString(), surrogateTargets, logFn);
+			updateRowsInDatabase(globalDb, rec, dp, true, QString(), surrogateTargets, logFn);
 			if (logFn) {
 				logFn(QStringLiteral("[Retry] fixed case_hash=%1 cpress=%2 MPa sigma=%3 MPa")
 				          .arg(rec.caseHash)
@@ -378,8 +380,8 @@ FailedCaseRetryStats GearOptFailedCaseRetry::run(const FailedCaseRetryOptions& o
 				++stats.meshTimeoutFailed;
 			else
 				++stats.stillFailed;
-			updateRowsInDatabase(runDb, rec, dp, false, err, logFn);
-			updateRowsInDatabase(globalDb, rec, dp, false, err, logFn);
+			updateRowsInDatabase(runDb, rec, dp, false, err, surrogateTargets, logFn);
+			updateRowsInDatabase(globalDb, rec, dp, false, err, surrogateTargets, logFn);
 		}
 
 		if (QApplication::instance())

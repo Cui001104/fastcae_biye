@@ -1,5 +1,7 @@
 #include "GearSurrogateModel.h"
 
+#include "GearSurrogateSampleValidation.h"
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -151,7 +153,8 @@ HypervolumeReference2D computeDynamicHypervolumeReference(const QVector<Surrogat
 	return ref;
 }
 
-bool GearSurrogateModel::train(const QVector<SurrogateSample>& samples)
+bool GearSurrogateModel::train(const QVector<SurrogateSample>& samples,
+                               const QStringList& surrogateTargets)
 {
 	_ready = false;
 	_samples.clear();
@@ -165,10 +168,11 @@ bool GearSurrogateModel::train(const QVector<SurrogateSample>& samples)
 	_scale.clear();
 	_dim = 0;
 
+	const QStringList targets =
+	    surrogateTargets.isEmpty() ? defaultSurrogateTargets() : surrogateTargets;
+
 	for (const SurrogateSample& s : samples) {
-		if (s.x.isEmpty() || s.cpressMax <= 0.0 || !std::isfinite(s.cpressMax)
-		    || s.edgeLoadRatio <= 0.0 || !std::isfinite(s.edgeLoadRatio)
-		    || s.cpressCV <= 0.0 || !std::isfinite(s.cpressCV))
+		if (s.x.isEmpty() || !surrogateTrainingValid(s, targets))
 			continue;
 		if (_dim == 0)
 			_dim = s.x.size();
@@ -239,7 +243,17 @@ bool GearSurrogateModel::train(const QVector<SurrogateSample>& samples)
 	_cpressCVWeights = solveRbfWeights(cvY);
 	_sigmaWeights = solveRbfWeights(sigmaY);
 	_uWeights = solveRbfWeights(uY);
-	_ready = !_cpressWeights.isEmpty() && !_edgeLoadRatioWeights.isEmpty();
+
+	auto targetReady = [&](const QString& metric, const QVector<double>& weights) {
+		if (!targets.contains(metric))
+			return true;
+		return !weights.isEmpty();
+	};
+	_ready = targetReady(QLatin1String(kSurrogateMetricCpressMax), _cpressWeights)
+	         && targetReady(QLatin1String(kSurrogateMetricEdgeLoadRatio), _edgeLoadRatioWeights)
+	         && targetReady(QLatin1String(kSurrogateMetricCpressCV), _cpressCVWeights)
+	         && targetReady(QLatin1String(kSurrogateMetricSigmaMax), _sigmaWeights)
+	         && targetReady(QLatin1String(kSurrogateMetricUMax), _uWeights);
 	return _ready;
 }
 

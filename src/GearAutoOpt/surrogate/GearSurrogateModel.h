@@ -5,6 +5,7 @@
 #include "GearAutoOpt/data/GearDesignPoint.h"
 
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 namespace GearAutoOpt {
@@ -59,7 +60,8 @@ GEARAUTOOPTAPI int minSurrogateSampleCount(int populationSize = 30);
 
 class GEARAUTOOPTAPI GearSurrogateModel {
 public:
-	bool train(const QVector<SurrogateSample>& samples);
+	bool train(const QVector<SurrogateSample>& samples,
+	           const QStringList& surrogateTargets = QStringList());
 	SurrogatePrediction predict(const QVector<double>& vars) const;
 	bool isReady() const { return _ready; }
 	int inputDimension() const { return _dim; }

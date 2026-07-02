@@ -1,5 +1,7 @@
 #include "GearSurrogateVerboseLog.h"
 
+#include "GearAutoOpt/surrogate/GearSurrogateSampleValidation.h"
+
 #include "GearAutoOpt/data/GearOptGeometryBridge.h"
 #include "GearAutoOpt/db/GearOptResultDatabase.h"
 
@@ -213,19 +215,20 @@ void emitSurrogateDbSummary(const GearOptConfig& cfg,
 
 	auto& globalDb = GearOptResultDatabase::global();
 	auto& runDb    = GearOptResultDatabase::runSession();
+	const QStringList targets = cfg.effectiveSurrogateTargets();
 
 	SurrogateSampleLoadStats gStats;
 	SurrogateSampleLoadStats rStats;
 	if (globalDb.isOpen())
-		globalDb.loadValidatedSamples(baseCaseHash, fixedWidthMm, 0, &gStats);
+		globalDb.loadValidatedSamples(baseCaseHash, fixedWidthMm, 0, &gStats, targets);
 	if (runDb.isOpen())
-		runDb.loadValidatedSamples(baseCaseHash, fixedWidthMm, 0, &rStats);
+		runDb.loadValidatedSamples(baseCaseHash, fixedWidthMm, 0, &rStats, targets);
 
 	const int gVerified = globalDb.isOpen()
-	                          ? globalDb.countValidatedSamplesForBaseCase(baseCaseHash, fixedWidthMm)
+	                          ? globalDb.countValidatedSamplesForBaseCase(baseCaseHash, fixedWidthMm, targets)
 	                          : 0;
 	const int rVerified = runDb.isOpen()
-	                          ? runDb.countValidatedSamplesForBaseCase(baseCaseHash, fixedWidthMm)
+	                          ? runDb.countValidatedSamplesForBaseCase(baseCaseHash, fixedWidthMm, targets)
 	                          : 0;
 
 	logFn(QStringLiteral("[GearOpt][DBSummary]"));

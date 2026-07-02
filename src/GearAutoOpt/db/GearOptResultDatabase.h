@@ -10,6 +10,7 @@
 #include <QMetaType>
 #include <QSet>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 class QTextStream;
@@ -90,18 +91,20 @@ public:
 	bool loadResultByCaseHash(const QString& hash, GearDesignPoint& dp) const;
 	bool designHashExists(const QString& baseCaseHash,
 	                      const QString& designHash) const;
-	/// 同一 baseCaseHash 且 verified_by_ccx=1、status=done 的 CCX 样本数。
+	/// 同一 baseCaseHash 且满足当前代理目标校验的 CCX 样本数。
 	/// fixedWidthMm>=0 时仅统计齿宽与固定值一致的样本。
 	int countValidatedSamplesForBaseCase(const QString& baseCaseHash,
-	                                     double fixedWidthMm = -1.0) const;
+	                                     double fixedWidthMm = -1.0,
+	                                     const QStringList& surrogateTargets = QStringList()) const;
 
 	/// 加载可用于 RBF 训练的样本；maxCount<=0 表示不限制条数。
 	/// fixedWidthMm>=0 时仅加载 ABS(width-fixedWidth)<1e-6 的样本。
-	/// stats 非空时填充 total / valid / failedSkipped 计数并写 debug 日志。
+	/// surrogateTargets 为空时使用 defaultSurrogateTargets()。
 	QVector<SurrogateSample> loadValidatedSamples(const QString& baseCaseHash,
 	                                              double fixedWidthMm = -1.0,
 	                                              int maxCount = 0,
-	                                              SurrogateSampleLoadStats* stats = nullptr) const;
+	                                              SurrogateSampleLoadStats* stats = nullptr,
+	                                              const QStringList& surrogateTargets = QStringList()) const;
 
 	/// status='failed' 或 cpressMax_MPa<0 或 is_valid=0 的 case_hash（infill 黑名单）。
 	QSet<QString> failedCaseHashesForBaseCase(const QString& baseCaseHash,
@@ -112,7 +115,9 @@ public:
 	                                                  double fixedWidthMm = -1.0) const;
 
 	/// 成功重算后 UPDATE 原记录（不 INSERT）。
-	bool updateDesignPointResultByRowId(int rowId, const GearDesignPoint& dp);
+	bool updateDesignPointResultByRowId(int rowId,
+	                                    const GearDesignPoint& dp,
+	                                    const QStringList& surrogateTargets = QStringList());
 
 	/// 重算仍失败：保留 failed，递增 retry_count 并记录 last_error_message。
 	bool recordRetryFailureByRowId(int rowId, const QString& errorMsg);
@@ -136,7 +141,8 @@ public:
 	                             int rank = 0,
 	                             double crowdingDistance = 0.0,
 	                             int isPareto = 0,
-	                             const QString& caseHashValue = QString());
+	                             const QString& caseHashValue = QString(),
+	                             const QStringList& surrogateTargets = QStringList());
 
 	bool insertSimulationResult(const GearDesignPoint& dp, int generation, int pointId);
 
@@ -155,6 +161,8 @@ public:
 	                                     const CpressDistributionMetrics& metrics);
 
 	int countValidResults() const;
+	/// 六项指标全部有效的 done 样本数（论文统计 / 完整导出）。
+	int countFullMetricsResults() const;
 	int backfillMissingCpressDistributionMetrics(int binCount = 11, int maxRows = 0) const;
 	CpressDistributionBackfillStats backfillMissingCpressDistributionMetricsDetailed(
 	    int binCount = 11,

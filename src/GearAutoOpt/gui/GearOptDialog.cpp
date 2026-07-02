@@ -635,7 +635,8 @@ void GearOptDialog::onStart() {
             }
             const QString baseCaseH = GearOptResultDatabase::baseCaseHash(baseDp);
             const int existing =
-                globalDb.countValidatedSamplesForBaseCase(baseCaseH, baseDp.commonWidth);
+                globalDb.countValidatedSamplesForBaseCase(baseCaseH, baseDp.commonWidth,
+                                                          cfg.effectiveSurrogateTargets());
             initialNeeded = std::max(0, minSamples - existing);
         }
         _totalPoints = initialNeeded + _maxGen * infillPerRound;

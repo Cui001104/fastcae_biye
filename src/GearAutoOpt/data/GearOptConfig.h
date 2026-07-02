@@ -6,6 +6,7 @@
 #include "GearAutoOpt/data/GearLogLevel.h"
 
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 class QJsonObject;
@@ -137,9 +138,15 @@ struct GEARAUTOOPTAPI GearOptConfig {
 
 	DesignVariableFlags designVars;
 
+	/// RBF 代理训练目标（metric 名，如 cpressMax_MPa、edgeLoadRatio）；空则使用默认双目标。
+	QStringList surrogateTargets;
+
 	/// 当为 true 时，NSGA-II 初始种群第 0 个体固定为 optimizationBase，设计空间为局部 bounds。
 	GearDesignPoint optimizationBase;
 	bool          useOptimizationBase = false;
+
+	/// 空则等同 defaultSurrogateTargets()。
+	QStringList effectiveSurrogateTargets() const;
 
 	GearOptConfig();
 

@@ -1,6 +1,7 @@
 #include "GearOptResultDatabase.h"
 
 #include "GearAutoOpt/data/GearMetricDefinition.h"
+#include "GearAutoOpt/surrogate/GearSurrogateSampleValidation.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -66,61 +67,41 @@ bool ensureColumn(QSqlQuery& query, const char* table, const char* columnSql)
 	return true;
 }
 
-QString validatedSurrogateSampleWhereSql()
+bool backfillSurrogateValidityColumns(QSqlQuery& query)
 {
-	return QStringLiteral(
-	    " status = 'done'"
-	    " AND converged = 1"
-	    " AND is_valid = 1"
-	    " AND verified_by_ccx = 1"
-	    " AND cpressMax_MPa > 0"
-	    " AND sigmaMax_MPa > 0"
-	    " AND uMax_mm >= 0"
-	    " AND mass_kg > 0"
-	    " AND edgeLoadRatio IS NOT NULL"
-	    " AND edgeLoadRatio > 0"
-	    " AND cpressCV IS NOT NULL"
-	    " AND cpressCV > 0");
-}
-
-bool computeConvergedFromMetrics(const GearDesignPoint& dp)
-{
-	return dp.status == PointStatus::Done
-	       && dp.cpressMax_MPa > 0.0 && std::isfinite(dp.cpressMax_MPa)
-	       && dp.sigmaMax > 0.0 && std::isfinite(dp.sigmaMax)
-	       && dp.uMax >= 0.0 && std::isfinite(dp.uMax)
-	       && dp.mass > 0.0 && std::isfinite(dp.mass)
-	       && dp.edgeLoadRatio > 0.0 && std::isfinite(dp.edgeLoadRatio)
-	       && dp.cpressCV > 0.0 && std::isfinite(dp.cpressCV);
-}
-
-int computeIsValidFlag(const GearDesignPoint& dp)
-{
-	if (dp.status == PointStatus::Failed || dp.status == PointStatus::Invalid)
-		return 0;
-	if (dp.cpressMax_MPa < 0.0 || dp.sigmaMax < 0.0 || dp.uMax < 0.0 || dp.mass < 0.0)
-		return 0;
-	if (!computeConvergedFromMetrics(dp))
-		return 0;
-	return 1;
-}
-
-bool backfillValidityAndConvergedColumns(QSqlQuery& query)
-{
-	if (!query.exec(QStringLiteral(
-	        "UPDATE gear_opt_results SET is_valid = 0"
-	        " WHERE status = 'failed'"
-	        " OR cpressMax_MPa < 0 OR sigmaMax_MPa < 0"
-	        " OR uMax_mm < 0 OR mass_kg < 0"))) {
-		logSqlQuery(query, "backfillIsValidFailed");
+	const QStringList defaultTargets = defaultSurrogateTargets();
+	QString targetDoneSql = QStringLiteral("status = 'done'");
+	for (const QString& metric : defaultTargets) {
+		const QString clause = surrogateTargetMetricSqlClause(metric);
+		if (!clause.isEmpty())
+			targetDoneSql += QStringLiteral(" AND") + clause;
 	}
+
 	if (!query.exec(QStringLiteral(
-	        "UPDATE gear_opt_results SET is_valid = 1, converged = 1"
-	        " WHERE status = 'done'"
+	        "UPDATE gear_opt_results SET full_metrics_valid = CASE WHEN"
+	        " status = 'done'"
 	        " AND cpressMax_MPa > 0 AND sigmaMax_MPa > 0"
 	        " AND uMax_mm >= 0 AND mass_kg > 0"
-	        " AND edgeLoadRatio > 0 AND cpressCV > 0"))) {
-		logSqlQuery(query, "backfillIsValidDone");
+	        " AND edgeLoadRatio > 0 AND cpressCV > 0"
+	        " THEN 1 ELSE 0 END"))) {
+		logSqlQuery(query, "backfillFullMetricsValid");
+	}
+
+	const QString surrogateValidSet = QStringLiteral(
+	    "UPDATE gear_opt_results SET"
+	    " verified_by_ccx = CASE WHEN %1 THEN 1 ELSE 0 END,"
+	    " converged = CASE WHEN %1 THEN 1 ELSE 0 END,"
+	    " is_valid = CASE WHEN %1 THEN 1"
+	    " WHEN status IN ('failed', 'invalid') THEN 0"
+	    " ELSE is_valid END").arg(targetDoneSql);
+	if (!query.exec(surrogateValidSet)) {
+		logSqlQuery(query, "backfillSurrogateValidity");
+	}
+
+	if (!query.exec(QStringLiteral(
+	        "UPDATE gear_opt_results SET is_valid = 0"
+	        " WHERE status IN ('failed', 'invalid')"))) {
+		logSqlQuery(query, "backfillIsValidFailed");
 	}
 	return true;
 }
@@ -372,11 +353,12 @@ bool GearOptResultDatabase::ensureGearOptResultsTable() const
 	    "last_error_message TEXT",
 	    "last_retry_time TEXT",
 	    "is_valid INTEGER DEFAULT 1",
+	    "full_metrics_valid INTEGER DEFAULT 0",
 	};
 	for (const char* col : kExtraColumns)
 		ensureColumn(query, kMainTable, col);
 
-	backfillValidityAndConvergedColumns(query);
+	backfillSurrogateValidityColumns(query);
 
 	return true;
 }
@@ -616,7 +598,8 @@ bool GearOptResultDatabase::insertDesignPointResult(const QString& runId,
                                                     int rank,
                                                     double crowdingDistance,
                                                     int isPareto,
-                                                    const QString& caseHashValue)
+                                                    const QString& caseHashValue,
+                                                    const QStringList& surrogateTargets)
 {
 	if (!isOpen()) {
 		qWarning().noquote() << QStringLiteral("[GearOpt][DB] insertDesignPointResult: database not open");
@@ -635,7 +618,7 @@ bool GearOptResultDatabase::insertDesignPointResult(const QString& runId,
 	// 列顺序与 bind 顺序必须一致；占位符由列数自动生成，避免手写 ? 数量错误。
 	// MSVC：不用 brace / QStringList(int,size) 初始化，改用 operator<<。
 	QStringList cols;
-	cols.reserve(63);
+	cols.reserve(64);
 	cols << QStringLiteral("run_id") << QStringLiteral("gen") << QStringLiteral("individual_id")
 	     << QStringLiteral("created_at") << QStringLiteral("z1") << QStringLiteral("z2")
 	     << QStringLiteral("module") << QStringLiteral("alpha") << QStringLiteral("x1")
@@ -670,7 +653,7 @@ bool GearOptResultDatabase::insertDesignPointResult(const QString& runId,
 	     << QStringLiteral("design_hash") << QStringLiteral("converged")
 	     << QStringLiteral("solve_time_s") << QStringLiteral("retry_count")
 	     << QStringLiteral("last_error_message") << QStringLiteral("last_retry_time")
-	     << QStringLiteral("is_valid");
+	     << QStringLiteral("is_valid") << QStringLiteral("full_metrics_valid");
 
 	const QString tableName = QString::fromLatin1(kMainTable);
 	QStringList placeholderList;
@@ -691,8 +674,10 @@ bool GearOptResultDatabase::insertDesignPointResult(const QString& runId,
 		return false;
 	}
 
-	const int convergedFlag = computeConvergedFromMetrics(store) ? 1 : 0;
-	const int isValidFlag   = computeIsValidFlag(store);
+	const SurrogateResultFlags flags =
+	    computeSurrogateResultFlags(store, surrogateTargets);
+	const int convergedFlag = flags.converged;
+	const int isValidFlag   = flags.isValid;
 
 	int bindCount = 0;
 	const auto bind = [&](const QVariant& v) { query.bindValue(bindCount++, v); };
@@ -768,7 +753,7 @@ bool GearOptResultDatabase::insertDesignPointResult(const QString& runId,
 	bind(caseH);
 	bind(QStringLiteral("ccx"));
 	bind(0);
-	bind(1);
+	bind(flags.verifiedByCcx);
 	bind(baseCaseHash(store));
 	bind(designHash(store));
 	bind(convergedFlag);
@@ -777,6 +762,7 @@ bool GearOptResultDatabase::insertDesignPointResult(const QString& runId,
 	bind(QString());
 	bind(QString());
 	bind(isValidFlag);
+	bind(flags.fullMetricsValid);
 
 	if (bindCount != cols.size()) {
 		qWarning().noquote()
@@ -821,7 +807,8 @@ bool GearOptResultDatabase::insertSimulationResult(const GearDesignPoint& dp,
 }
 
 int GearOptResultDatabase::countValidatedSamplesForBaseCase(const QString& baseCaseH,
-                                                           double fixedWidthMm) const
+                                                           double fixedWidthMm,
+                                                           const QStringList& surrogateTargets) const
 {
 	if (!isOpen() || baseCaseH.isEmpty())
 		return 0;
@@ -831,7 +818,7 @@ int GearOptResultDatabase::countValidatedSamplesForBaseCase(const QString& baseC
 	QString sql = QStringLiteral(
 	    "SELECT COUNT(*) FROM gear_opt_results"
 	    " WHERE base_case_hash = ?"
-	    " AND") + validatedSurrogateSampleWhereSql();
+	    " AND") + validatedSurrogateSampleWhereSql(surrogateTargets);
 	if (fixedWidthMm >= 0.0)
 		sql += QStringLiteral(" AND ABS(width - ?) < 1e-6");
 	query.prepare(sql);
@@ -933,11 +920,15 @@ QSet<QString> GearOptResultDatabase::knownDesignHashesForBaseCase(const QString&
 QVector<SurrogateSample> GearOptResultDatabase::loadValidatedSamples(const QString& baseCaseH,
                                                                      double fixedWidthMm,
                                                                      int maxCount,
-                                                                     SurrogateSampleLoadStats* stats) const
+                                                                     SurrogateSampleLoadStats* stats,
+                                                                     const QStringList& surrogateTargets) const
 {
 	QVector<SurrogateSample> out;
 	if (!isOpen() || baseCaseH.isEmpty())
 		return out;
+
+	const QStringList targets =
+	    surrogateTargets.isEmpty() ? defaultSurrogateTargets() : surrogateTargets;
 
 	QSqlDatabase db = QSqlDatabase::database(connectionName(), false);
 	QSqlQuery      query(db);
@@ -953,7 +944,7 @@ QVector<SurrogateSample> GearOptResultDatabase::loadValidatedSamples(const QStri
 	    " cpressMax_MPa, edgeLoadRatio, cpressCV, sigmaMax_MPa, uMax_mm, mass_kg"
 	    " FROM gear_opt_results"
 	    " WHERE base_case_hash = ?"
-	    " AND") + validatedSurrogateSampleWhereSql();
+	    " AND") + validatedSurrogateSampleWhereSql(targets);
 	if (fixedWidthMm >= 0.0)
 		sql += QStringLiteral(" AND ABS(width - ?) < 1e-6");
 	sql += QStringLiteral(" ORDER BY id ASC");
@@ -997,27 +988,43 @@ QVector<SurrogateSample> GearOptResultDatabase::loadValidatedSamples(const QStri
 		s.sigmaMax   = query.value(col++).toDouble();
 		s.uMax       = query.value(col++).toDouble();
 		s.mass       = query.value(col++).toDouble();
+		GearDesignPoint loadedDp;
+		loadedDp.status          = PointStatus::Done;
+		loadedDp.cpressMax_MPa   = s.cpressMax;
+		loadedDp.edgeLoadRatio   = s.edgeLoadRatio;
+		loadedDp.cpressCV        = s.cpressCV;
+		loadedDp.sigmaMax        = s.sigmaMax;
+		loadedDp.uMax            = s.uMax;
+		loadedDp.mass            = s.mass;
 		const bool metricsOk = s.x.size() == kSurrogateInputDim
-		                       && s.cpressMax > 0.0 && std::isfinite(s.cpressMax)
-		                       && s.sigmaMax > 0.0 && std::isfinite(s.sigmaMax)
-		                       && s.uMax >= 0.0 && std::isfinite(s.uMax)
-		                       && s.mass > 0.0 && std::isfinite(s.mass)
-		                       && s.edgeLoadRatio > 0.0 && std::isfinite(s.edgeLoadRatio)
-		                       && s.cpressCV > 0.0 && std::isfinite(s.cpressCV);
+		                       && surrogateTrainingValid(loadedDp, targets);
 		if (metricsOk)
 			out.append(s);
-		else if (s.cpressMax <= 0.0 || !std::isfinite(s.cpressMax))
-			qDebug().noquote() << QStringLiteral("[GearOpt][DB] Skip sample because cpressMax_MPa is missing.");
-		else if (s.sigmaMax <= 0.0 || !std::isfinite(s.sigmaMax))
-			qDebug().noquote() << QStringLiteral("[GearOpt][DB] Skip sample because sigmaMax_MPa is missing.");
-		else if (s.uMax < 0.0 || !std::isfinite(s.uMax))
-			qDebug().noquote() << QStringLiteral("[GearOpt][DB] Skip sample because uMax_mm is missing.");
-		else if (s.mass <= 0.0 || !std::isfinite(s.mass))
-			qDebug().noquote() << QStringLiteral("[GearOpt][DB] Skip sample because mass_kg is missing.");
-		else if (s.edgeLoadRatio <= 0.0)
-			qDebug().noquote() << QStringLiteral("[GearOpt][DB] Skip sample because edgeLoadRatio is missing.");
-		else if (s.cpressCV <= 0.0)
-			qDebug().noquote() << QStringLiteral("[GearOpt][DB] Skip sample because cpressCV is missing.");
+		else {
+			for (const QString& metric : targets) {
+				if (surrogateTargetMetricValid(loadedDp, metric))
+					continue;
+				if (metric == QLatin1String(kSurrogateMetricCpressMax))
+					qDebug().noquote()
+					    << QStringLiteral("[GearOpt][DB] Skip sample because cpressMax_MPa is missing.");
+				else if (metric == QLatin1String(kSurrogateMetricSigmaMax))
+					qDebug().noquote()
+					    << QStringLiteral("[GearOpt][DB] Skip sample because sigmaMax_MPa is missing.");
+				else if (metric == QLatin1String(kSurrogateMetricUMax))
+					qDebug().noquote()
+					    << QStringLiteral("[GearOpt][DB] Skip sample because uMax_mm is missing.");
+				else if (metric == QLatin1String(kSurrogateMetricMass))
+					qDebug().noquote()
+					    << QStringLiteral("[GearOpt][DB] Skip sample because mass_kg is missing.");
+				else if (metric == QLatin1String(kSurrogateMetricEdgeLoadRatio))
+					qDebug().noquote()
+					    << QStringLiteral("[GearOpt][DB] Skip sample because edgeLoadRatio is missing.");
+				else if (metric == QLatin1String(kSurrogateMetricCpressCV))
+					qDebug().noquote()
+					    << QStringLiteral("[GearOpt][DB] Skip sample because cpressCV is missing.");
+				break;
+			}
+		}
 	}
 
 	if (stats) {
@@ -1227,15 +1234,19 @@ QVector<FailedCaseRecord> GearOptResultDatabase::loadFailedCasesForRetry(const Q
 	return out;
 }
 
-bool GearOptResultDatabase::updateDesignPointResultByRowId(int rowId, const GearDesignPoint& dp)
+bool GearOptResultDatabase::updateDesignPointResultByRowId(int rowId,
+                                                           const GearDesignPoint& dp,
+                                                           const QStringList& surrogateTargets)
 {
 	if (!isOpen() || rowId <= 0)
 		return false;
 
 	GearDesignPoint store = dp;
 	store.syncLegacyResultFields();
-	const int convergedFlag = computeConvergedFromMetrics(store) ? 1 : 0;
-	const int isValidFlag   = computeIsValidFlag(store);
+	const SurrogateResultFlags flags =
+	    computeSurrogateResultFlags(store, surrogateTargets);
+	const int convergedFlag = flags.converged;
+	const int isValidFlag   = flags.isValid;
 
 	QSqlDatabase db = QSqlDatabase::database(connectionName(), false);
 	QSqlQuery      query(db);
@@ -1249,7 +1260,8 @@ bool GearOptResultDatabase::updateDesignPointResultByRowId(int rowId, const Gear
 	    " cpressActiveNodes=?, cpressBinCount=?,"
 	    " nodeCount=?, elementCount=?,"
 	    " status=?, errorMsg=?, runDir=?, meshInpPath=?, jobInpPath=?, datPath=?, frdPath=?,"
-	    " converged=?, solve_time_s=?, is_valid=?, last_error_message=?, last_retry_time=?"
+	    " converged=?, solve_time_s=?, is_valid=?, verified_by_ccx=?, full_metrics_valid=?,"
+	    " last_error_message=?, last_retry_time=?"
 	    " WHERE id=?"));
 
 	int b = 0;
@@ -1284,6 +1296,8 @@ bool GearOptResultDatabase::updateDesignPointResultByRowId(int rowId, const Gear
 	query.bindValue(b++, convergedFlag);
 	query.bindValue(b++, store.solverTime);
 	query.bindValue(b++, isValidFlag);
+	query.bindValue(b++, flags.verifiedByCcx);
+	query.bindValue(b++, flags.fullMetricsValid);
 	query.bindValue(b++, QString());
 	query.bindValue(b++, QDateTime::currentDateTime().toString(Qt::ISODate));
 	query.bindValue(b++, rowId);
@@ -1292,12 +1306,17 @@ bool GearOptResultDatabase::updateDesignPointResultByRowId(int rowId, const Gear
 		logSqlQuery(query, "updateDesignPointResultByRowId");
 		return false;
 	}
-	qDebug().noquote() << QStringLiteral("[GearOpt][DB] update ok row_id=%1 case_hash=%2 status=%3 converged=%4 is_valid=%5")
-	                      .arg(rowId)
-	                      .arg(caseHash(store))
-	                      .arg(pointStatusToString(store.status))
-	                      .arg(convergedFlag)
-	                      .arg(isValidFlag);
+	qDebug().noquote()
+	    << QStringLiteral(
+	           "[GearOpt][DB] update ok row_id=%1 case_hash=%2 status=%3 converged=%4 is_valid=%5 "
+	           "verified_by_ccx=%6 full_metrics_valid=%7")
+	           .arg(rowId)
+	           .arg(caseHash(store))
+	           .arg(pointStatusToString(store.status))
+	           .arg(convergedFlag)
+	           .arg(isValidFlag)
+	           .arg(flags.verifiedByCcx)
+	           .arg(flags.fullMetricsValid);
 	return true;
 }
 
@@ -1366,10 +1385,27 @@ int GearOptResultDatabase::countValidResults() const
 	QSqlQuery      query(db);
 	if (!query.exec(QStringLiteral(
 	        "SELECT COUNT(*) FROM gear_opt_results"
-	        " WHERE status = 'done' AND is_valid = 1 AND converged = 1"
-	        " AND cpressMax_MPa > 0 AND sigmaMax_MPa > 0"))) {
+	        " WHERE status = 'done' AND is_valid = 1 AND verified_by_ccx = 1"))) {
 		logSqlQuery(query, "countValidResults");
 		qWarning().noquote() << QStringLiteral("[GearOpt][DB] countValidResults failed");
+		return 0;
+	}
+	if (!query.next())
+		return 0;
+	return query.value(0).toInt();
+}
+
+int GearOptResultDatabase::countFullMetricsResults() const
+{
+	if (!isOpen())
+		return 0;
+
+	QSqlDatabase db = QSqlDatabase::database(connectionName(), false);
+	QSqlQuery      query(db);
+	if (!query.exec(QStringLiteral(
+	        "SELECT COUNT(*) FROM gear_opt_results"
+	        " WHERE status = 'done' AND full_metrics_valid = 1"))) {
+		logSqlQuery(query, "countFullMetricsResults");
 		return 0;
 	}
 	if (!query.next())

@@ -49,6 +49,13 @@ GearOptConfig::GearOptConfig()
 	objectives.minMass = false;
 }
 
+QStringList GearOptConfig::effectiveSurrogateTargets() const
+{
+	if (!surrogateTargets.isEmpty())
+		return surrogateTargets;
+	return {QStringLiteral("cpressMax_MPa"), QStringLiteral("edgeLoadRatio")};
+}
+
 GearOptConfig GearOptConfig::defaultConfig()
 {
 	GearOptConfig c;
@@ -351,6 +358,13 @@ QJsonObject GearOptConfig::toJson() const
 	objJson["target_ratio"]   = objectives.targetRatio;
 	root["objectives"]        = objJson;
 
+	if (!surrogateTargets.isEmpty()) {
+		QJsonArray targetArr;
+		for (const QString& t : surrogateTargets)
+			targetArr.append(t);
+		root["surrogate_targets"] = targetArr;
+	}
+
 	QJsonObject conJson;
 	conJson["sigma_allow"]              = constraints.sigmaAllow;
 	conJson["min_tooth_count"]          = constraints.minToothCount;
@@ -450,6 +464,15 @@ GearOptConfig GearOptConfig::fromJson(const QJsonObject& root)
 	c.objectives.minMass      = obj.value("min_mass").toBool(false);
 	c.objectives.minRatioErr = obj.value("min_ratio_err").toBool(false);
 	c.objectives.targetRatio = obj.value("target_ratio").toDouble(1.0);
+
+	if (root.contains("surrogate_targets") && root.value("surrogate_targets").isArray()) {
+		c.surrogateTargets.clear();
+		for (const QJsonValue& v : root.value("surrogate_targets").toArray()) {
+			const QString t = v.toString().trimmed();
+			if (!t.isEmpty())
+				c.surrogateTargets.append(t);
+		}
+	}
 
 	const QJsonObject con = root.value("constraints").toObject();
 	c.constraints.sigmaAllow            = con.value("sigma_allow").toDouble(600.0);

@@ -9,6 +9,7 @@
 #include "GearAutoOpt/solver/CCXResultParser.h"
 #include "GearAutoOpt/surrogate/GearInfillSelector.h"
 #include "GearAutoOpt/surrogate/GearSurrogateMetrics.h"
+#include "GearAutoOpt/surrogate/GearSurrogateSampleValidation.h"
 #include "GearSurrogateVerboseLog.h"
 
 #include <QDebug>
@@ -46,24 +47,6 @@ GearDesignPoint GearAutoOptManager::configuredBasePoint() const
     return dp;
 }
 
-static bool isValidSurrogateTrainingSample(const SurrogateSample& s, const GearOptConfig& cfg)
-{
-    Q_UNUSED(cfg);
-    if (s.cpressMax <= 0.0 || !std::isfinite(s.cpressMax))
-        return false;
-    if (s.sigmaMax <= 0.0 || !std::isfinite(s.sigmaMax))
-        return false;
-    if (s.uMax < 0.0 || !std::isfinite(s.uMax))
-        return false;
-    if (s.mass <= 0.0 || !std::isfinite(s.mass))
-        return false;
-    if (s.edgeLoadRatio <= 0.0 || !std::isfinite(s.edgeLoadRatio))
-        return false;
-    if (s.cpressCV <= 0.0 || !std::isfinite(s.cpressCV))
-        return false;
-    return true;
-}
-
 static std::pair<double, double> paretoObjectiveMax(const Population& pareto)
 {
     double maxCpress = -1.0;
@@ -88,11 +71,13 @@ static QVector<SurrogateSample> loadMergedValidatedSamples(const QString& baseCa
     SurrogateSampleLoadStats globalStats;
     SurrogateSampleLoadStats runStats;
     int duplicateSkipped = 0;
+    const QStringList targets = cfg.effectiveSurrogateTargets();
     auto ingestDb = [&](GearOptResultDatabase& db, SurrogateSampleLoadStats* dbStats) {
         if (!db.isOpen())
             return;
-        for (const SurrogateSample& s : db.loadValidatedSamples(baseCaseH, fixedWidthMm, 0, dbStats)) {
-            if (!isValidSurrogateTrainingSample(s, cfg))
+        for (const SurrogateSample& s :
+             db.loadValidatedSamples(baseCaseH, fixedWidthMm, 0, dbStats, targets)) {
+            if (!surrogateTrainingValid(s, targets))
                 continue;
             const QString key = !s.caseHash.isEmpty()
                                     ? s.caseHash
@@ -124,8 +109,9 @@ static QList<GearDesignPoint> designPointsFromValidatedSamples(
     QList<GearDesignPoint> out;
     out.reserve(samples.size());
     int idx = 0;
+    const QStringList targets = cfg.effectiveSurrogateTargets();
     for (const SurrogateSample& s : samples) {
-        if (!isValidSurrogateTrainingSample(s, cfg))
+        if (!surrogateTrainingValid(s, targets))
             continue;
         GearDesignPoint dp = baseDp;
         if (!s.x.isEmpty())
@@ -275,6 +261,8 @@ static void logEnabledObjectives(const GearOptConfig& cfg,
         emitLog(QStringLiteral(
             "[GearOpt][Objectives] mass objective disabled; mass is recorded only"));
     }
+    emitLog(QStringLiteral("[GearOpt][Surrogate] targets: %1")
+                .arg(cfg.effectiveSurrogateTargets().join(QStringLiteral(", "))));
 }
 
 static Population populationFromValidatedSamples(const QVector<SurrogateSample>& samples,
@@ -282,8 +270,9 @@ static Population populationFromValidatedSamples(const QVector<SurrogateSample>&
 {
     Population pop;
     pop.reserve(samples.size());
+    const QStringList targets = cfg.effectiveSurrogateTargets();
     for (const SurrogateSample& s : samples) {
-        if (!isValidSurrogateTrainingSample(s, cfg))
+        if (!surrogateTrainingValid(s, targets))
             continue;
         Individual ind;
         ind.objs.append(s.cpressMax);
@@ -350,8 +339,9 @@ static void logBestRealSoFar(const QVector<SurrogateSample>& samples,
 {
     const SurrogateSample* bestCpress = nullptr;
     const SurrogateSample* bestSigma = nullptr;
+    const QStringList targets = cfg.effectiveSurrogateTargets();
     for (const SurrogateSample& s : samples) {
-        if (!isValidSurrogateTrainingSample(s, cfg))
+        if (!surrogateTrainingValid(s, targets))
             continue;
         if (!bestCpress || s.cpressMax < bestCpress->cpressMax)
             bestCpress = &s;
@@ -568,7 +558,7 @@ void GearAutoOptManager::evaluatePopulationByCcx(
             if (!db.isOpen())
                 return;
             const bool ok = db.insertDesignPointResult(_runId, dp, generation, i, ind.rank, ind.crowdingDist,
-                                       dp.isPareto, caseH);
+                                       dp.isPareto, caseH, _cfg.effectiveSurrogateTargets());
             emit log(QStringLiteral("[GearOpt][Case] case_id=%1 case_hash=%2 workDir=%3 dbUpdateStatus=%4 db=%5")
                          .arg(i)
                          .arg(caseH)
@@ -923,13 +913,15 @@ void GearAutoOptManager::evaluateInfillByCcxParallel(
                 continue;
 
             const InfillCasePrep prep = prepByIndex.value(idx);
-            futures.push_back(std::async(std::launch::async, [prep, cfgCopyCcx, runIdCopyCcx, meshParamsCopy,
+            // 主线程 prep 后 nodeCount/elementCount/mass 在 outcomes[idx].dp，勿用 prep.dp（prep 前快照）
+            const GearDesignPoint prepDp = outcomes[idx].dp;
+            futures.push_back(std::async(std::launch::async, [prep, prepDp, cfgCopyCcx, runIdCopyCcx, meshParamsCopy,
                                                               logLevelCopyCcx, threadsPerJob, generation]() {
                 ParallelCcxOutcome out;
                 out.index          = prep.index;
                 out.skippedByCache = false;
                 out.ccxRan         = true;
-                out.dp             = prep.dp;
+                out.dp             = prepDp;
                 out.dp.runDir      = prep.workDir;
 
                 const auto t0 = std::chrono::steady_clock::now();
@@ -994,7 +986,7 @@ void GearAutoOptManager::evaluateInfillByCcxParallel(
             if (!db.isOpen())
                 return;
             const bool ok = db.insertDesignPointResult(_runId, dp, generation, i, ind.rank, ind.crowdingDist,
-                                       dp.isPareto, prep.caseHash);
+                                       dp.isPareto, prep.caseHash, _cfg.effectiveSurrogateTargets());
             emit log(QStringLiteral("[GearOpt][Case] case_id=%1 case_hash=%2 workDir=%3 dbUpdateStatus=%4 db=%5")
                          .arg(i)
                          .arg(prep.caseHash)
@@ -1483,7 +1475,7 @@ void GearAutoOptManager::startSurrogateAssisted()
         }
 
         GearSurrogateModel model;
-        const bool trained = model.train(samples);
+        const bool trained = model.train(samples, _cfg.effectiveSurrogateTargets());
         emitRbfTrainingLog(round, trained, samples.size(), samples, model, vLog);
         if (!trained) {
             emit log(QStringLiteral("[GearOpt][Surrogate] model training failed; need more valid cpressMax samples"));
